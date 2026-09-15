@@ -16,7 +16,7 @@ export interface RoomMeta {
 
 export class MAGDRoomObject {
   private state: DurableObjectState;
-  private sessions: Map<WebSocket, { id: string; isHost: boolean }> = new Map();
+  private sessions: Map<WebSocket, { id: string; isHost: boolean; token?: string }> = new Map();
   private meta: RoomMeta | null = null;
 
   constructor(state: DurableObjectState) {
@@ -25,6 +25,26 @@ export class MAGDRoomObject {
 
   async fetch(request: Request): Promise<Response> {
     const url = new URL(request.url);
+
+    if (url.pathname === '/init' && request.method === 'POST') {
+      const data = await request.json() as any;
+      this.meta = {
+        code: data.code,
+        name: data.name || 'MAGD Server',
+        map: data.map || 'crossfire',
+        game: data.game || 'valve',
+        hostName: data.hostName || 'Host',
+        players: 1,
+        maxPlayers: data.maxPlayers || 16,
+        hasPassword: !!data.hasPassword,
+        password: data.password || undefined,
+        createdAt: Date.now(),
+        lastHeartbeat: Date.now()
+      };
+      return new Response(JSON.stringify(this.meta), {
+        headers: { 'Content-Type': 'application/json' }
+      });
+    }
 
     if (url.pathname === '/info') {
       if (!this.meta) {
@@ -38,9 +58,14 @@ export class MAGDRoomObject {
       });
     }
 
-    if (url.pathname === '/ws') {
+    if (url.pathname === '/ws' || url.pathname.startsWith('/ws/')) {
       if (request.headers.get('Upgrade') !== 'websocket') {
         return new Response('Expected WebSocket', { status: 400 });
+      }
+
+      const token = url.searchParams.get('token');
+      if (!token || !token.startsWith('magd_token_')) {
+        return new Response('Unauthorized: Invalid or missing MAGD token', { status: 401 });
       }
 
       const pair = new WebSocketPair();
@@ -49,7 +74,7 @@ export class MAGDRoomObject {
       const clientId = crypto.randomUUID();
       const isHost = url.searchParams.get('role') === 'host';
 
-      if (isHost) {
+      if (isHost && !this.meta) {
         const roomCode = url.searchParams.get('code') || 'MAGD-' + Math.random().toString(36).substring(2, 6).toUpperCase();
         this.meta = {
           code: roomCode,
@@ -67,9 +92,8 @@ export class MAGDRoomObject {
       }
 
       this.state.acceptWebSocket(server);
-      this.sessions.set(server, { id: clientId, isHost });
+      this.sessions.set(server, { id: clientId, isHost, token });
 
-      // Send WELCOME
       const welcome = createMessage(MagdMessageType.WELCOME, new TextEncoder().encode(JSON.stringify({ clientId, isHost, code: this.meta?.code })));
       server.send(welcome);
 
@@ -96,20 +120,17 @@ export class MAGDRoomObject {
       return;
     }
 
-    // Binary packet relaying
     const header = parseHeader(message);
     if (!header) return;
 
     if (header.type === MagdMessageType.GAME_DATAGRAM) {
       if (session.isHost) {
-        // Relay host datagram to all clients
         for (const [peer, peerSession] of this.sessions.entries()) {
           if (!peerSession.isHost) {
             try { peer.send(message); } catch {}
           }
         }
       } else {
-        // Relay client datagram to host
         for (const [peer, peerSession] of this.sessions.entries()) {
           if (peerSession.isHost) {
             try { peer.send(message); } catch {}
@@ -124,9 +145,10 @@ export class MAGDRoomObject {
     if (session) {
       this.sessions.delete(ws);
       if (session.isHost) {
-        // Host disconnected -> close all client sessions
         for (const peer of this.sessions.keys()) {
-          try { peer.close(1001, 'Host disconnected'); } catch {}
+          if (peer !== ws) {
+            try { peer.close(1001, 'Host disconnected'); } catch {}
+          }
         }
         this.sessions.clear();
         this.meta = null;
