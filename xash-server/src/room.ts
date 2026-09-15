@@ -120,6 +120,11 @@ export class MAGDRoomObject {
       return;
     }
 
+    // Packet size security bounds check (reject > 16KB oversize datagrams)
+    if (message.byteLength > 16384) {
+      return;
+    }
+
     const header = parseHeader(message);
     if (!header) return;
 
