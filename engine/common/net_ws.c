@@ -16,6 +16,7 @@ GNU General Public License for more details.
 #include "common.h"
 #include "client.h" // ConnectionProgress
 #include "netchan.h"
+#include "magd_net.h"
 #include "xash3d_mathlib.h"
 #include "ipv6text.h"
 #include "net_ws_private.h"
@@ -1416,6 +1417,12 @@ qboolean NET_GetPacket( netsrc_t sock, netadr_t *from, byte *data, size_t *lengt
 	if( !data || !length )
 		return false;
 
+	if( MAGD_GetMode() == MAGD_NET_MODE_TUNNEL )
+	{
+		if( MAGD_GetDatagram( data, length, from ))
+			return true;
+	}
+
 	NET_AdjustLag();
 
 	if( NET_GetLoopPacket( sock, from, data, length ))
@@ -1520,6 +1527,12 @@ void NET_SendPacketEx( netsrc_t sock, size_t length, const void *data, netadr_t 
 	{
 		NET_SendLoopPacket( sock, length, data, to );
 		return;
+	}
+
+	if( MAGD_GetMode() == MAGD_NET_MODE_TUNNEL )
+	{
+		if( MAGD_SendDatagram( data, length, &to ))
+			return;
 	}
 	else if( type == NA_BROADCAST || type == NA_IP )
 	{
