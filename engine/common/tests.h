@@ -47,6 +47,7 @@ void Test_RunDelta( void );
 void Test_RunBuffer( void );
 void Test_RunMunge( void );
 void Test_RunTitles( void );
+void Test_RunMagd( void );
 
 #define TEST_LIST_0 \
 	Test_RunLibCommon(); \
@@ -56,7 +57,8 @@ void Test_RunTitles( void );
 	Test_RunIPFilter(); \
 	Test_RunBuffer(); \
 	Test_RunDelta(); \
-	Test_RunMunge();
+	Test_RunMunge(); \
+	Test_RunMagd();
 
 #define TEST_LIST_0_CLIENT \
 	Test_RunCon(); \
