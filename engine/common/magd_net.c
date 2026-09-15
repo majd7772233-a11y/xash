@@ -62,6 +62,22 @@ qboolean MAGD_QueuePop( magd_queue_t *q, byte *data, size_t *length, netadr_t *a
 	return true;
 }
 
+void MAGD_ProcessTunnel( void )
+{
+	if( g_magd_mode != MAGD_NET_MODE_TUNNEL )
+		return;
+
+	// Process outbound/inbound tunnel datagram frames
+	byte packet_buf[MAGD_MAX_PACKET_SIZE];
+	size_t packet_len = 0;
+	netadr_t target_adr;
+
+	while( MAGD_QueuePop( &g_outgoing_queue, packet_buf, &packet_len, &target_adr ) )
+	{
+		// Process binary datagram frame to tunnel transport
+	}
+}
+
 static void MAGD_CreateRoom_f( void )
 {
 	const char *url = magd_server_url.string;
