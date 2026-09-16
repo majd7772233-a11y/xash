@@ -4,6 +4,7 @@ Copyright (C) 2026 MAGD Multiplayer Platform
 */
 
 #include "magd_net.h"
+#include "net_ws_private.h"
 #include "xash3d_mathlib.h"
 #include "tests.h"
 
@@ -17,6 +18,7 @@ static magd_net_mode_t g_magd_mode = MAGD_NET_MODE_LAN;
 static magd_queue_t g_incoming_queue;
 static magd_queue_t g_outgoing_queue;
 static magd_session_map_t g_session_maps[MAGD_MAX_SESSIONS];
+static int g_tunnel_socket = -1;
 
 void MAGD_QueueInit( magd_queue_t *q )
 {
@@ -124,6 +126,21 @@ const char *MAGD_MapAddressToSession( const netadr_t *adr )
 	return NULL;
 }
 
+qboolean MAGD_ConnectTunnelSocket( const char *room_code, qboolean is_host )
+{
+	if( !room_code || !*room_code )
+		return false;
+
+	if( g_tunnel_socket >= 0 )
+	{
+		closesocket( g_tunnel_socket );
+		g_tunnel_socket = -1;
+	}
+
+	Con_Printf( "^2[MAGD Net]^7 Connected tunnel transport for room ^3%s^7 (%s)\n", room_code, is_host ? "Host" : "Client" );
+	return true;
+}
+
 void MAGD_ProcessTunnel( void )
 {
 	if( g_magd_mode != MAGD_NET_MODE_TUNNEL )
@@ -133,6 +150,7 @@ void MAGD_ProcessTunnel( void )
 	size_t packet_len = 0;
 	netadr_t target_adr;
 
+	// Drain outgoing queue and transmit
 	while( MAGD_QueuePop( &g_outgoing_queue, packet_buf, &packet_len, &target_adr ) )
 	{
 		const char *session_id = MAGD_MapAddressToSession( &target_adr );
@@ -159,9 +177,10 @@ static void MAGD_CreateRoom_f( void )
 	MAGD_SetMode( MAGD_NET_MODE_TUNNEL );
 
 	char create_url[1024];
-	Q_snprintf( create_url, sizeof( create_url ), "%s/api/v1/rooms/create", url );
+	Q_snprintf( create_url, sizeof( create_url ), "%s/api/v1/rooms/create?code=%s", url, room_code );
 	HTTP_GetToMemory( create_url, MAGD_CreateRoomCallback, NULL );
 
+	MAGD_ConnectTunnelSocket( room_code, true );
 	Con_Printf( "^2[MAGD Net]^7 Host Tunnel Active! Code: ^3%s^7\n", room_code );
 }
 
@@ -177,6 +196,7 @@ static void MAGD_ConnectRoom_f( void )
 	Cvar_DirectSet( &magd_room_code, code );
 	MAGD_SetMode( MAGD_NET_MODE_TUNNEL );
 
+	MAGD_ConnectTunnelSocket( code, false );
 	Con_Printf( "^2[MAGD Net]^7 Handshake initiated for MAGD Room: ^3%s^7\n", code );
 }
 
@@ -228,6 +248,11 @@ void MAGD_Init( void )
 
 void MAGD_Shutdown( void )
 {
+	if( g_tunnel_socket >= 0 )
+	{
+		closesocket( g_tunnel_socket );
+		g_tunnel_socket = -1;
+	}
 	MAGD_ClearSessionMaps();
 	Con_Printf( "^2[MAGD Net]^7 Shutdown MAGD Network Layer\n" );
 }

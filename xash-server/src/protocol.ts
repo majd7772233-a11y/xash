@@ -39,6 +39,7 @@ export function parseHeader(buffer: ArrayBuffer): MagdHeader | null {
   if (magic !== MAGD_MAGIC) return null;
   const type = view.getUint8(2) as MagdMessageTypeValue;
   const length = view.getUint16(3, false);
+  if (buffer.byteLength < 5 + length) return null;
   return { magic, type, length };
 }
 
