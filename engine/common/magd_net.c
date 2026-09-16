@@ -140,17 +140,29 @@ void MAGD_ProcessTunnel( void )
 	}
 }
 
+static void MAGD_CreateRoomCallback( const char *url, qboolean success, const byte *data, size_t size, void *userdata )
+{
+	if( success && data && size > 0 )
+	{
+		Con_Printf( "^2[MAGD Net]^7 Room registered on Cloudflare Workers!\n" );
+	}
+}
+
 static void MAGD_CreateRoom_f( void )
 {
 	const char *url = magd_server_url.string;
-	Con_Printf( "^2[MAGD Net]^7 Creating room on MAGD Platform (%s)...\n", url );
+	Con_Printf( "^2[MAGD Net]^7 Registering room on MAGD Platform (%s)...\n", url );
 
 	char room_code[16];
 	Q_snprintf( room_code, sizeof( room_code ), "MAGD-%04X", (unsigned int)(COM_RandomLong(0x1000, 0xFFFF)) );
 	Cvar_DirectSet( &magd_room_code, room_code );
 	MAGD_SetMode( MAGD_NET_MODE_TUNNEL );
 
-	Con_Printf( "^2[MAGD Net]^7 Room created! Code: ^3%s^7\n", room_code );
+	char create_url[1024];
+	Q_snprintf( create_url, sizeof( create_url ), "%s/api/v1/rooms/create", url );
+	HTTP_GetToMemory( create_url, MAGD_CreateRoomCallback, NULL );
+
+	Con_Printf( "^2[MAGD Net]^7 Host Tunnel Active! Code: ^3%s^7\n", room_code );
 }
 
 static void MAGD_ConnectRoom_f( void )
