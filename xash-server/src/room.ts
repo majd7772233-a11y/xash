@@ -1,4 +1,4 @@
-import { parseHeader, createMessage, MagdMessageType } from './protocol';
+import { parseHeader, createMessage, MagdMessageType, MagdSessionState, MagdSessionStateValue } from './protocol';
 
 export interface RoomMeta {
   code: string;
@@ -14,9 +14,16 @@ export interface RoomMeta {
   lastHeartbeat: number;
 }
 
+interface PeerSession {
+  id: string;
+  isHost: boolean;
+  token?: string;
+  state: MagdSessionStateValue;
+}
+
 export class MAGDRoomObject {
   private state: DurableObjectState;
-  private sessions: Map<WebSocket, { id: string; isHost: boolean; token?: string }> = new Map();
+  private sessions: Map<WebSocket, PeerSession> = new Map();
   private meta: RoomMeta | null = null;
 
   constructor(state: DurableObjectState) {
@@ -53,7 +60,8 @@ export class MAGDRoomObject {
           headers: { 'Content-Type': 'application/json' }
         });
       }
-      return new Response(JSON.stringify(this.meta), {
+      const { password, ...safeMeta } = this.meta;
+      return new Response(JSON.stringify(safeMeta), {
         headers: { 'Content-Type': 'application/json' }
       });
     }
@@ -92,7 +100,7 @@ export class MAGDRoomObject {
       }
 
       this.state.acceptWebSocket(server);
-      this.sessions.set(server, { id: clientId, isHost, token });
+      this.sessions.set(server, { id: clientId, isHost, token, state: MagdSessionState.AUTHENTICATED });
 
       const welcome = createMessage(MagdMessageType.WELCOME, new TextEncoder().encode(JSON.stringify({ clientId, isHost, code: this.meta?.code })));
       server.send(welcome);
@@ -115,12 +123,13 @@ export class MAGDRoomObject {
           if (data.players !== undefined) this.meta.players = data.players;
           if (data.map !== undefined) this.meta.map = data.map;
           ws.send(JSON.stringify({ type: 'PONG', timestamp: Date.now() }));
+        } else if (data.type === 'READY') {
+          session.state = MagdSessionState.READY;
         }
       } catch {}
       return;
     }
 
-    // Packet size security bounds check (reject > 16KB oversize datagrams)
     if (message.byteLength > 16384) {
       return;
     }
@@ -129,6 +138,7 @@ export class MAGDRoomObject {
     if (!header) return;
 
     if (header.type === MagdMessageType.GAME_DATAGRAM) {
+      session.state = MagdSessionState.IN_ROOM;
       if (session.isHost) {
         for (const [peer, peerSession] of this.sessions.entries()) {
           if (!peerSession.isHost) {

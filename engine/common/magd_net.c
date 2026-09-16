@@ -4,6 +4,7 @@ Copyright (C) 2026 MAGD Multiplayer Platform
 */
 
 #include "magd_net.h"
+#include "xash3d_mathlib.h"
 #include "tests.h"
 
 CVAR_DEFINE( magd_enabled, "magd_enabled", "1", FCVAR_ARCHIVE, "Enable MAGD Network Abstraction Layer" );
@@ -15,6 +16,7 @@ static magd_net_mode_t g_magd_mode = MAGD_NET_MODE_LAN;
 
 static magd_queue_t g_incoming_queue;
 static magd_queue_t g_outgoing_queue;
+static magd_session_map_t g_session_maps[MAGD_MAX_SESSIONS];
 
 void MAGD_QueueInit( magd_queue_t *q )
 {
@@ -62,19 +64,79 @@ qboolean MAGD_QueuePop( magd_queue_t *q, byte *data, size_t *length, netadr_t *a
 	return true;
 }
 
+void MAGD_ClearSessionMaps( void )
+{
+	memset( g_session_maps, 0, sizeof( g_session_maps ) );
+}
+
+qboolean MAGD_MapSessionToAddress( const char *session_id, netadr_t *out_adr )
+{
+	if( !session_id || !out_adr || !*session_id )
+		return false;
+
+	// Check if already mapped
+	for( int i = 0; i < MAGD_MAX_SESSIONS; i++ )
+	{
+		if( g_session_maps[i].active && !Q_strcmp( g_session_maps[i].session_id, session_id ) )
+		{
+			*out_adr = g_session_maps[i].virtual_adr;
+			return true;
+		}
+	}
+
+	// Allocate new virtual netadr_t
+	for( int i = 0; i < MAGD_MAX_SESSIONS; i++ )
+	{
+		if( !g_session_maps[i].active )
+		{
+			Q_strncpy( g_session_maps[i].session_id, session_id, sizeof( g_session_maps[i].session_id ) );
+			g_session_maps[i].active = true;
+
+			// Assign virtual address 10.254.0.<i+1>:27015
+			memset( &g_session_maps[i].virtual_adr, 0, sizeof( netadr_t ) );
+			NET_NetadrSetType( &g_session_maps[i].virtual_adr, NA_IP );
+			g_session_maps[i].virtual_adr.ip[0] = 10;
+			g_session_maps[i].virtual_adr.ip[1] = 254;
+			g_session_maps[i].virtual_adr.ip[2] = 0;
+			g_session_maps[i].virtual_adr.ip[3] = (byte)(i + 1);
+			g_session_maps[i].virtual_adr.port = BigShort( 27015 );
+
+			*out_adr = g_session_maps[i].virtual_adr;
+			return true;
+		}
+	}
+
+	return false;
+}
+
+const char *MAGD_MapAddressToSession( const netadr_t *adr )
+{
+	if( !adr ) return NULL;
+
+	for( int i = 0; i < MAGD_MAX_SESSIONS; i++ )
+	{
+		if( g_session_maps[i].active && NET_CompareAdr( g_session_maps[i].virtual_adr, *adr ) )
+		{
+			return g_session_maps[i].session_id;
+		}
+	}
+
+	return NULL;
+}
+
 void MAGD_ProcessTunnel( void )
 {
 	if( g_magd_mode != MAGD_NET_MODE_TUNNEL )
 		return;
 
-	// Process outbound/inbound tunnel datagram frames
 	byte packet_buf[MAGD_MAX_PACKET_SIZE];
 	size_t packet_len = 0;
 	netadr_t target_adr;
 
 	while( MAGD_QueuePop( &g_outgoing_queue, packet_buf, &packet_len, &target_adr ) )
 	{
-		// Process binary datagram frame to tunnel transport
+		const char *session_id = MAGD_MapAddressToSession( &target_adr );
+		(void)session_id;
 	}
 }
 
@@ -147,12 +209,14 @@ void MAGD_Init( void )
 
 	MAGD_QueueInit( &g_incoming_queue );
 	MAGD_QueueInit( &g_outgoing_queue );
+	MAGD_ClearSessionMaps();
 
 	Con_Printf( "^2[MAGD Net]^7 Initialized MAGD Network Layer (Default: LAN/Direct)\n" );
 }
 
 void MAGD_Shutdown( void )
 {
+	MAGD_ClearSessionMaps();
 	Con_Printf( "^2[MAGD Net]^7 Shutdown MAGD Network Layer\n" );
 }
 
@@ -199,7 +263,7 @@ void Test_RunMagd( void )
 	byte test_data[] = "MAGD_PACKET_TEST";
 	byte out_data[128];
 	size_t out_len = 0;
-	netadr_t adr_in, adr_out;
+	netadr_t adr_in, adr_out, virt_adr;
 
 	Msg( "Testing MAGD Queue...\n" );
 	MAGD_QueueInit( &q );
@@ -215,5 +279,18 @@ void Test_RunMagd( void )
 	TASSERT_EQi( out_len, sizeof( test_data ) );
 	TASSERT_STR( (char*)out_data, (char*)test_data );
 	TASSERT_EQi( q.count, 0 );
+
+	Msg( "Testing MAGD Address Mapping...\n" );
+	MAGD_ClearSessionMaps();
+	qboolean map_ok = MAGD_MapSessionToAddress( "session_peer_123", &virt_adr );
+	TASSERT_EQi( map_ok, true );
+	TASSERT_EQi( virt_adr.ip[0], 10 );
+	TASSERT_EQi( virt_adr.ip[1], 254 );
+	TASSERT_EQi( virt_adr.ip[2], 0 );
+	TASSERT_EQi( virt_adr.ip[3], 1 );
+
+	const char *mapped_id = MAGD_MapAddressToSession( &virt_adr );
+	TASSERT_NEQp( mapped_id, NULL );
+	TASSERT_STR( mapped_id, "session_peer_123" );
 }
 #endif
