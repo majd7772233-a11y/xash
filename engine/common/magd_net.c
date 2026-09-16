@@ -19,6 +19,7 @@ static magd_queue_t g_incoming_queue;
 static magd_queue_t g_outgoing_queue;
 static magd_session_map_t g_session_maps[MAGD_MAX_SESSIONS];
 static int g_tunnel_socket = -1;
+static qboolean g_tunnel_connected = false;
 
 void MAGD_QueueInit( magd_queue_t *q )
 {
@@ -135,9 +136,66 @@ qboolean MAGD_ConnectTunnelSocket( const char *room_code, qboolean is_host )
 	{
 		closesocket( g_tunnel_socket );
 		g_tunnel_socket = -1;
+		g_tunnel_connected = false;
 	}
 
-	Con_Printf( "^2[MAGD Net]^7 Connected tunnel transport for room ^3%s^7 (%s)\n", room_code, is_host ? "Host" : "Client" );
+	// Extract hostname from magd_server_url
+	char host[256] = "xash-server.magd.workers.dev";
+	int port = 80;
+	const char *url_str = magd_server_url.string;
+	if( !Q_strnicmp( url_str, "https://", 8 ) )
+	{
+		Q_strncpy( host, url_str + 8, sizeof( host ) );
+		port = 443;
+	}
+	else if( !Q_strnicmp( url_str, "http://", 7 ) )
+	{
+		Q_strncpy( host, url_str + 7, sizeof( host ) );
+		port = 80;
+	}
+
+	char *slash = Q_strchr( host, '/' );
+	if( slash ) *slash = '\0';
+
+	struct sockaddr_storage addr;
+	if( NET_StringToSockaddr( host, &addr, false, AF_INET ) != NET_EAI_OK )
+	{
+		Con_Printf( S_WARN "^2[MAGD Net]^7 Could not resolve server address: %s\n", host );
+		return false;
+	}
+
+	((struct sockaddr_in *)&addr)->sin_port = BigShort( port );
+
+	int sock = socket( addr.ss_family, SOCK_STREAM, IPPROTO_TCP );
+	if( sock < 0 )
+	{
+		Con_Printf( S_WARN "^2[MAGD Net]^7 Socket creation failed\n" );
+		return false;
+	}
+
+	NET_MakeSocketNonBlocking( sock );
+	connect( sock, (struct sockaddr *)&addr, NET_SockAddrLen( &addr ) );
+
+	g_tunnel_socket = sock;
+	g_tunnel_connected = true;
+
+	// Send HTTP WebSocket Upgrade Request
+	char upgrade_req[1024];
+	const char *token = magd_auth_token.string;
+	if( !token || !*token ) token = "magd_token_default";
+
+	Q_snprintf( upgrade_req, sizeof( upgrade_req ),
+		"GET /ws/room/%s?role=%s&token=%s HTTP/1.1\r\n"
+		"Host: %s\r\n"
+		"Upgrade: websocket\r\n"
+		"Connection: Upgrade\r\n"
+		"Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\n"
+		"Sec-WebSocket-Version: 13\r\n\r\n",
+		room_code, is_host ? "host" : "client", token, host );
+
+	send( g_tunnel_socket, upgrade_req, Q_strlen( upgrade_req ), 0 );
+
+	Con_Printf( "^2[MAGD Net]^7 WebSocket Tunnel connected to %s for room ^3%s^7 (%s)\n", host, room_code, is_host ? "Host" : "Client" );
 	return true;
 }
 
@@ -161,7 +219,7 @@ qboolean MAGD_ClientTunnelInit( const char *room_code )
 
 void MAGD_ProcessTunnel( void )
 {
-	if( g_magd_mode != MAGD_NET_MODE_TUNNEL )
+	if( g_magd_mode != MAGD_NET_MODE_TUNNEL || g_tunnel_socket < 0 )
 		return;
 
 	byte packet_buf[MAGD_MAX_PACKET_SIZE];
@@ -298,6 +356,7 @@ void MAGD_Shutdown( void )
 	{
 		closesocket( g_tunnel_socket );
 		g_tunnel_socket = -1;
+		g_tunnel_connected = false;
 	}
 	MAGD_ClearSessionMaps();
 	Con_Printf( "^2[MAGD Net]^7 Shutdown MAGD Network Layer\n" );
