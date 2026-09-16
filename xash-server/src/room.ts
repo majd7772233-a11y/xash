@@ -1,5 +1,5 @@
 import { parseHeader, createMessage, MagdMessageType, MagdSessionState, MagdSessionStateValue } from './protocol';
-import { verifyToken } from './auth';
+import { verifyToken, hashPassword } from './auth';
 
 export interface RoomMeta {
   code: string;
@@ -10,7 +10,7 @@ export interface RoomMeta {
   players: number;
   maxPlayers: number;
   hasPassword: boolean;
-  password?: string;
+  passwordHash?: string;
   createdAt: number;
   lastHeartbeat: number;
 }
@@ -36,6 +36,7 @@ export class MAGDRoomObject {
 
     if (url.pathname === '/init' && request.method === 'POST') {
       const data = await request.json() as any;
+      const passHash = data.password ? await hashPassword(data.password) : undefined;
       this.meta = {
         code: data.code,
         name: data.name || 'MAGD Server',
@@ -45,7 +46,7 @@ export class MAGDRoomObject {
         players: 1,
         maxPlayers: data.maxPlayers || 16,
         hasPassword: !!data.hasPassword,
-        password: data.password || undefined,
+        passwordHash: passHash,
         createdAt: Date.now(),
         lastHeartbeat: Date.now()
       };
@@ -61,7 +62,7 @@ export class MAGDRoomObject {
           headers: { 'Content-Type': 'application/json' }
         });
       }
-      const { password, ...safeMeta } = this.meta;
+      const { passwordHash, ...safeMeta } = this.meta;
       return new Response(JSON.stringify(safeMeta), {
         headers: { 'Content-Type': 'application/json' }
       });
@@ -86,7 +87,11 @@ export class MAGDRoomObject {
       const providedPassword = url.searchParams.get('password');
 
       if (!isHost && this.meta && this.meta.hasPassword) {
-        if (providedPassword !== this.meta.password) {
+        if (!providedPassword) {
+          return new Response('Forbidden: Room password required', { status: 403 });
+        }
+        const providedHash = await hashPassword(providedPassword);
+        if (providedHash !== this.meta.passwordHash) {
           return new Response('Forbidden: Incorrect room password', { status: 403 });
         }
       }
@@ -98,6 +103,8 @@ export class MAGDRoomObject {
 
       if (isHost && !this.meta) {
         const roomCode = url.searchParams.get('code') || 'MAGD-' + Math.random().toString(36).substring(2, 6).toUpperCase();
+        const rawPass = url.searchParams.get('password');
+        const passHash = rawPass ? await hashPassword(rawPass) : undefined;
         this.meta = {
           code: roomCode,
           name: url.searchParams.get('name') || 'MAGD Server',
@@ -106,8 +113,8 @@ export class MAGDRoomObject {
           hostName: url.searchParams.get('host') || 'Host',
           players: 1,
           maxPlayers: parseInt(url.searchParams.get('maxPlayers') || '16', 10),
-          hasPassword: !!url.searchParams.get('password'),
-          password: url.searchParams.get('password') || undefined,
+          hasPassword: !!rawPass,
+          passwordHash: passHash,
           createdAt: Date.now(),
           lastHeartbeat: Date.now()
         };
