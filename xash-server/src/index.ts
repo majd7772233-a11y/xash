@@ -1,4 +1,5 @@
 import { MAGDRoomObject } from './room';
+import { generateToken } from './auth';
 
 export { MAGDRoomObject };
 
@@ -31,17 +32,46 @@ export default {
 
     // Auth Guest Token
     if (url.pathname === '/api/v1/auth/guest') {
-      const token = 'magd_token_' + crypto.randomUUID().replace(/-/g, '');
-      return new Response(JSON.stringify({ token, expiresAt: Date.now() + 86400 * 1000 }), {
+      const exp = Date.now() + 86400 * 1000;
+      const sub = crypto.randomUUID();
+      const token = await generateToken({ sub, exp });
+      return new Response(JSON.stringify({ token, expiresAt: exp }), {
         headers: { 'Content-Type': 'application/json', ...corsHeaders }
       });
     }
 
-    // Create Room Endpoint
-    if (url.pathname === '/api/v1/rooms/create' && request.method === 'POST') {
+    // Create Room Endpoint (Accepts both POST and GET query parameters)
+    if (url.pathname === '/api/v1/rooms/create') {
       try {
-        const body = await request.json() as any;
-        const code = body.code || 'MAGD-' + Math.random().toString(36).substring(2, 6).toUpperCase();
+        let name = 'MAGD Server';
+        let map = 'crossfire';
+        let game = 'valve';
+        let hostName = 'Host';
+        let maxPlayers = 16;
+        let password: string | undefined = undefined;
+        let code = 'MAGD-' + Math.random().toString(36).substring(2, 6).toUpperCase();
+
+        if (request.method === 'POST') {
+          try {
+            const body = await request.json() as any;
+            if (body.code) code = body.code;
+            if (body.name) name = body.name;
+            if (body.map) map = body.map;
+            if (body.game) game = body.game;
+            if (body.hostName) hostName = body.hostName;
+            if (body.maxPlayers) maxPlayers = body.maxPlayers;
+            if (body.password) password = body.password;
+          } catch {}
+        } else {
+          if (url.searchParams.get('code')) code = url.searchParams.get('code')!;
+          if (url.searchParams.get('name')) name = url.searchParams.get('name')!;
+          if (url.searchParams.get('map')) map = url.searchParams.get('map')!;
+          if (url.searchParams.get('game')) game = url.searchParams.get('game')!;
+          if (url.searchParams.get('host')) hostName = url.searchParams.get('host')!;
+          if (url.searchParams.get('maxPlayers')) maxPlayers = parseInt(url.searchParams.get('maxPlayers')!, 10);
+          if (url.searchParams.get('password')) password = url.searchParams.get('password')!;
+        }
+
         activeRooms.add(code);
 
         const id = env.ROOM_OBJECT.idFromName(code);
@@ -52,13 +82,13 @@ export default {
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             code,
-            name: body.name || 'MAGD Server',
-            map: body.map || 'crossfire',
-            game: body.game || 'valve',
-            hostName: body.hostName || 'Host',
-            maxPlayers: body.maxPlayers || 16,
-            hasPassword: !!body.password,
-            password: body.password || undefined
+            name,
+            map,
+            game,
+            hostName,
+            maxPlayers,
+            hasPassword: !!password,
+            password
           })
         });
 

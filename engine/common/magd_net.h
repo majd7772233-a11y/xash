@@ -11,6 +11,7 @@ Copyright (C) 2026 MAGD Multiplayer Platform
 
 #define MAGD_MAX_PACKET_SIZE 16384
 #define MAGD_QUEUE_SIZE 128
+#define MAGD_MAX_SESSIONS 32
 
 typedef enum magd_net_mode_e
 {
@@ -33,6 +34,13 @@ typedef struct magd_queue_s
 	int tail;
 	int count;
 } magd_queue_t;
+
+typedef struct magd_session_map_s
+{
+	char session_id[64];
+	netadr_t virtual_adr;
+	qboolean active;
+} magd_session_map_t;
 
 typedef struct magd_room_info_s
 {
@@ -59,6 +67,12 @@ void MAGD_SetMode( magd_net_mode_t mode );
 void MAGD_QueueInit( magd_queue_t *q );
 qboolean MAGD_QueuePush( magd_queue_t *q, const void *data, size_t length, const netadr_t *adr );
 qboolean MAGD_QueuePop( magd_queue_t *q, byte *data, size_t *length, netadr_t *adr );
+
+void MAGD_ProcessTunnel( void );
+
+qboolean MAGD_MapSessionToAddress( const char *session_id, netadr_t *out_adr );
+const char *MAGD_MapAddressToSession( const netadr_t *adr );
+void MAGD_ClearSessionMaps( void );
 
 qboolean MAGD_SendDatagram( const void *data, size_t length, const netadr_t *to );
 qboolean MAGD_GetDatagram( byte *data, size_t *length, netadr_t *from );

@@ -8,11 +8,23 @@ export const MagdMessageType = {
   HOST_REGISTER: 0x10,
   HOST_UPDATE: 0x11,
   JOIN_ROOM: 0x20,
+  READY: 0x21,
   GAME_DATAGRAM: 0x30,
   ERROR: 0xe0
 } as const;
 
 export type MagdMessageTypeValue = typeof MagdMessageType[keyof typeof MagdMessageType];
+
+export const MagdSessionState = {
+  DISCONNECTED: 0,
+  CONNECTING: 1,
+  AUTHENTICATED: 2,
+  IN_ROOM: 3,
+  READY: 4,
+  ERROR: 5
+} as const;
+
+export type MagdSessionStateValue = typeof MagdSessionState[keyof typeof MagdSessionState];
 
 export interface MagdHeader {
   magic: number;
