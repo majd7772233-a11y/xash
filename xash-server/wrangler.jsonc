@@ -1,0 +1,20 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "xash-server",
+  "main": "src/index.ts",
+  "compatibility_date": "2024-10-22",
+  "durable_objects": {
+    "bindings": [
+      {
+        "name": "ROOM_OBJECT",
+        "class_name": "MAGDRoomObject"
+      }
+    ]
+  },
+  "migrations": [
+    {
+      "tag": "v1",
+      "new_classes": ["MAGDRoomObject"]
+    }
+  ]
+}

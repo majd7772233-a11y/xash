@@ -30,6 +30,7 @@ GNU General Public License for more details.
 #include "server.h"
 #include "netchan.h"
 #include "protocol.h"
+#include "magd_net.h"
 #include "mod_local.h"
 #include "xash3d_mathlib.h"
 #include "input.h"
@@ -1226,6 +1227,7 @@ int EXPORT Host_Main( int argc, char **argv, const char *progname, int bChangeGa
 	NET_Init();
 	NET_InitMasters();
 	Netchan_Init();
+	MAGD_Init();
 
 	// allow to change game from the console
 	if( pChangeGame != NULL && Sys_CanRestart( ))
@@ -1381,6 +1383,7 @@ void Host_ShutdownWithReason( const char *reason )
 	SoundList_Shutdown();
 	Mod_Shutdown();
 	XRcon_Shutdown();
+	MAGD_Shutdown();
 	NET_Shutdown();
 	HTTP_Shutdown();
 	Host_FreeCommon();
