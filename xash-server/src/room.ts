@@ -1,4 +1,5 @@
 import { parseHeader, createMessage, MagdMessageType, MagdSessionState, MagdSessionStateValue } from './protocol';
+import { verifyToken } from './auth';
 
 export interface RoomMeta {
   code: string;
@@ -72,15 +73,28 @@ export class MAGDRoomObject {
       }
 
       const token = url.searchParams.get('token');
-      if (!token || !token.startsWith('magd_token_')) {
-        return new Response('Unauthorized: Invalid or missing MAGD token', { status: 401 });
+      if (!token) {
+        return new Response('Unauthorized: Missing MAGD token', { status: 401 });
+      }
+
+      const payload = await verifyToken(token);
+      if (!payload) {
+        return new Response('Unauthorized: Invalid or expired MAGD token', { status: 401 });
+      }
+
+      const isHost = url.searchParams.get('role') === 'host';
+      const providedPassword = url.searchParams.get('password');
+
+      if (!isHost && this.meta && this.meta.hasPassword) {
+        if (providedPassword !== this.meta.password) {
+          return new Response('Forbidden: Incorrect room password', { status: 403 });
+        }
       }
 
       const pair = new WebSocketPair();
       const [client, server] = Object.values(pair);
 
-      const clientId = crypto.randomUUID();
-      const isHost = url.searchParams.get('role') === 'host';
+      const clientId = payload.sub || crypto.randomUUID();
 
       if (isHost && !this.meta) {
         const roomCode = url.searchParams.get('code') || 'MAGD-' + Math.random().toString(36).substring(2, 6).toUpperCase();

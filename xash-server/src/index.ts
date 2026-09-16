@@ -1,4 +1,5 @@
 import { MAGDRoomObject } from './room';
+import { generateToken } from './auth';
 
 export { MAGDRoomObject };
 
@@ -31,8 +32,10 @@ export default {
 
     // Auth Guest Token
     if (url.pathname === '/api/v1/auth/guest') {
-      const token = 'magd_token_' + crypto.randomUUID().replace(/-/g, '');
-      return new Response(JSON.stringify({ token, expiresAt: Date.now() + 86400 * 1000 }), {
+      const exp = Date.now() + 86400 * 1000;
+      const sub = crypto.randomUUID();
+      const token = await generateToken({ sub, exp });
+      return new Response(JSON.stringify({ token, expiresAt: exp }), {
         headers: { 'Content-Type': 'application/json', ...corsHeaders }
       });
     }
