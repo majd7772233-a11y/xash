@@ -168,11 +168,39 @@ void MAGD_ProcessTunnel( void )
 	size_t packet_len = 0;
 	netadr_t target_adr;
 
-	// Drain outgoing queue and transmit
+	// Drain outgoing queue and transmit framed packets over socket when connected
 	while( MAGD_QueuePop( &g_outgoing_queue, packet_buf, &packet_len, &target_adr ) )
 	{
-		const char *session_id = MAGD_MapAddressToSession( &target_adr );
-		(void)session_id;
+		if( g_tunnel_socket >= 0 )
+		{
+			// Construct MAGD binary frame: Magic (2B 0x4D47) + Type (1B 0x30) + Length (2B) + Payload
+			byte frame[MAGD_MAX_PACKET_SIZE + 5];
+			frame[0] = 0x4D;
+			frame[1] = 0x47;
+			frame[2] = 0x30; // GAME_DATAGRAM
+			frame[3] = (byte)((packet_len >> 8) & 0xFF);
+			frame[4] = (byte)(packet_len & 0xFF);
+			memcpy( &frame[5], packet_buf, packet_len );
+
+			send( g_tunnel_socket, (const char *)frame, packet_len + 5, 0 );
+		}
+	}
+
+	// Receive non-blocking datagram frames from socket when connected
+	if( g_tunnel_socket >= 0 )
+	{
+		byte recv_buf[MAGD_MAX_PACKET_SIZE + 5];
+		int ret = recv( g_tunnel_socket, (char *)recv_buf, sizeof( recv_buf ), 0 );
+		if( ret > 5 && recv_buf[0] == 0x4D && recv_buf[1] == 0x47 && recv_buf[2] == 0x30 )
+		{
+			size_t payload_len = ((size_t)recv_buf[3] << 8) | recv_buf[4];
+			if( payload_len > 0 && payload_len <= (size_t)(ret - 5) )
+			{
+				netadr_t sender_adr;
+				MAGD_MapSessionToAddress( "remote_peer", &sender_adr );
+				MAGD_QueuePush( &g_incoming_queue, &recv_buf[5], payload_len, &sender_adr );
+			}
+		}
 	}
 }
 
