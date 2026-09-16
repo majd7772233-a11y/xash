@@ -69,6 +69,8 @@ qboolean MAGD_QueuePush( magd_queue_t *q, const void *data, size_t length, const
 qboolean MAGD_QueuePop( magd_queue_t *q, byte *data, size_t *length, netadr_t *adr );
 
 qboolean MAGD_ConnectTunnelSocket( const char *room_code, qboolean is_host );
+qboolean MAGD_HostTunnelInit( const char *room_code );
+qboolean MAGD_ClientTunnelInit( const char *room_code );
 void MAGD_ProcessTunnel( void );
 
 qboolean MAGD_MapSessionToAddress( const char *session_id, netadr_t *out_adr );

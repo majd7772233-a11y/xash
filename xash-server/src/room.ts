@@ -167,6 +167,7 @@ export class MAGDRoomObject {
           }
         }
       } else {
+        // Broadcast client packet with attached sender session ID to host
         for (const [peer, peerSession] of this.sessions.entries()) {
           if (peerSession.isHost) {
             try { peer.send(message); } catch {}

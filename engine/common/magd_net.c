@@ -141,6 +141,24 @@ qboolean MAGD_ConnectTunnelSocket( const char *room_code, qboolean is_host )
 	return true;
 }
 
+qboolean MAGD_HostTunnelInit( const char *room_code )
+{
+	if( !room_code || !*room_code )
+		return false;
+
+	Con_Printf( "^2[MAGD Net]^7 Host From Home Outbound Tunnel initialized for room: ^3%s^7\n", room_code );
+	return MAGD_ConnectTunnelSocket( room_code, true );
+}
+
+qboolean MAGD_ClientTunnelInit( const char *room_code )
+{
+	if( !room_code || !*room_code )
+		return false;
+
+	Con_Printf( "^2[MAGD Net]^7 Internet Client Join Tunnel initialized for room: ^3%s^7\n", room_code );
+	return MAGD_ConnectTunnelSocket( room_code, false );
+}
+
 void MAGD_ProcessTunnel( void )
 {
 	if( g_magd_mode != MAGD_NET_MODE_TUNNEL )
@@ -180,7 +198,7 @@ static void MAGD_CreateRoom_f( void )
 	Q_snprintf( create_url, sizeof( create_url ), "%s/api/v1/rooms/create?code=%s", url, room_code );
 	HTTP_GetToMemory( create_url, MAGD_CreateRoomCallback, NULL );
 
-	MAGD_ConnectTunnelSocket( room_code, true );
+	MAGD_HostTunnelInit( room_code );
 	Con_Printf( "^2[MAGD Net]^7 Host Tunnel Active! Code: ^3%s^7\n", room_code );
 }
 
@@ -196,7 +214,7 @@ static void MAGD_ConnectRoom_f( void )
 	Cvar_DirectSet( &magd_room_code, code );
 	MAGD_SetMode( MAGD_NET_MODE_TUNNEL );
 
-	MAGD_ConnectTunnelSocket( code, false );
+	MAGD_ClientTunnelInit( code );
 	Con_Printf( "^2[MAGD Net]^7 Handshake initiated for MAGD Room: ^3%s^7\n", code );
 }
 
