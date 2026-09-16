@@ -6,7 +6,7 @@ export async function hashPassword(password: string): Promise<string> {
   return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
 }
 
-export async function generateToken(payload: { sub: string; exp: number }, secretStr = 'magd_default_secret'): Promise<string> {
+export async function generateToken(payload: { sub: string; exp: number }, secretStr = process?.env?.JWT_SECRET || 'magd_default_secret'): Promise<string> {
   const encoder = new TextEncoder();
   const keyData = encoder.encode(secretStr);
   const key = await crypto.subtle.importKey('raw', keyData, { name: 'HMAC', hash: 'SHA-256' }, false, ['sign']);
@@ -27,7 +27,7 @@ export async function generateToken(payload: { sub: string; exp: number }, secre
   return `magd_token_${b64Header}.${b64Body}.${b64Signature}`;
 }
 
-export async function verifyToken(token: string, secretStr = 'magd_default_secret'): Promise<{ sub: string; exp: number } | null> {
+export async function verifyToken(token: string, secretStr = process?.env?.JWT_SECRET || 'magd_default_secret'): Promise<{ sub: string; exp: number } | null> {
   if (!token || !token.startsWith('magd_token_')) return null;
 
   const rawToken = token.replace('magd_token_', '');
