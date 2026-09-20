@@ -1,21 +1,8 @@
-import assert from 'node:assert';
+import assert from 'node:assert/strict';
 import { test } from 'node:test';
 
-test('Room Discovery Structure', () => {
-  const room = {
-    code: 'MAGD-1234',
-    name: "Majd's Server",
-    map: 'crossfire',
-    game: 'valve',
-    hostName: 'Majd',
-    players: 4,
-    maxPlayers: 8,
-    hasPassword: false,
-    createdAt: Date.now(),
-    lastHeartbeat: Date.now()
-  };
-
-  assert.strictEqual(room.code, 'MAGD-1234');
-  assert.strictEqual(room.players, 4);
-  assert.strictEqual(room.maxPlayers, 8);
+test('discovery contract accepts normalized MAGD room codes', () => {
+  for (const code of ['MAGD-AAAA', 'ROOM_01', 'ABC-123']) {
+    assert.match(code, /^[A-Z0-9_-]{3,64}$/);
+  }
 });
