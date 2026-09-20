@@ -1,0 +1,2 @@
+# Local development secret. Never commit a real production secret here.
+MAGD_JWT_SECRET="replace-with-a-long-random-secret"

@@ -2,19 +2,30 @@
   "$schema": "node_modules/wrangler/config-schema.json",
   "name": "xash-server",
   "main": "src/index.ts",
-  "compatibility_date": "2024-10-22",
+  "compatibility_date": "2026-09-18",
+  "workers_dev": true,
+
   "durable_objects": {
     "bindings": [
       {
         "name": "ROOM_OBJECT",
         "class_name": "MAGDRoomObject"
+      },
+      {
+        "name": "ROOM_REGISTRY",
+        "class_name": "MAGDRegistryObject"
       }
     ]
   },
-  "migrations": [
-    {
-      "tag": "v1",
-      "new_classes": ["MAGDRoomObject"]
+
+  "exports": {
+    "MAGDRoomObject": {
+      "type": "durable-object",
+      "storage": "sqlite"
+    },
+    "MAGDRegistryObject": {
+      "type": "durable-object",
+      "storage": "sqlite"
     }
-  ]
+  }
 }

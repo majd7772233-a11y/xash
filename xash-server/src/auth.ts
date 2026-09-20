@@ -1,60 +1,132 @@
+export type MagdRole = 'host' | 'client';
+
+export interface MagdTokenPayload {
+  sub: string;
+  exp: number;
+  role: MagdRole;
+  room: string;
+}
+
+const TOKEN_PREFIX = 'magd_token_';
+
+function base64UrlEncodeBytes(bytes: Uint8Array): string {
+  let binary = '';
+  const CHUNK_SIZE = 0x8000;
+
+  for (let offset = 0; offset < bytes.length; offset += CHUNK_SIZE) {
+    binary += String.fromCharCode(
+      ...bytes.subarray(offset, Math.min(offset + CHUNK_SIZE, bytes.length)),
+    );
+  }
+
+  return btoa(binary).replace(/=/g, '').replace(/\+/g, '-').replace(/\//g, '_');
+}
+
+function base64UrlEncodeText(text: string): string {
+  return base64UrlEncodeBytes(new TextEncoder().encode(text));
+}
+
+function base64UrlDecodeBytes(value: string): Uint8Array {
+  if (!/^[A-Za-z0-9_-]*$/.test(value)) {
+    throw new Error('Invalid base64url');
+  }
+
+  const padded = value.replace(/-/g, '+').replace(/_/g, '/') +
+    '='.repeat((4 - (value.length % 4)) % 4);
+  const binary = atob(padded);
+  const bytes = new Uint8Array(binary.length);
+
+  for (let i = 0; i < binary.length; i++) {
+    bytes[i] = binary.charCodeAt(i);
+  }
+  return bytes;
+}
+
+function base64UrlDecodeText(value: string): string {
+  return new TextDecoder().decode(base64UrlDecodeBytes(value));
+}
+
+function validPayload(value: unknown): value is MagdTokenPayload {
+  if (!value || typeof value !== 'object') return false;
+  const p = value as Partial<MagdTokenPayload>;
+  return (
+    typeof p.sub === 'string' && p.sub.length > 0 && p.sub.length <= 128 &&
+    typeof p.exp === 'number' && Number.isFinite(p.exp) && p.exp > Date.now() &&
+    (p.role === 'host' || p.role === 'client') &&
+    typeof p.room === 'string' && /^[A-Z0-9_-]{3,64}$/.test(p.room)
+  );
+}
+
 export async function hashPassword(password: string): Promise<string> {
-  const encoder = new TextEncoder();
-  const data = encoder.encode(password);
-  const hashBuffer = await crypto.subtle.digest('SHA-256', data);
-  const hashArray = Array.from(new Uint8Array(hashBuffer));
-  return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+  const digest = await crypto.subtle.digest(
+    'SHA-256',
+    new TextEncoder().encode(password),
+  );
+  return base64UrlEncodeBytes(new Uint8Array(digest));
 }
 
-export async function generateToken(payload: { sub: string; exp: number }, secretStr = 'magd_default_secret'): Promise<string> {
-  const encoder = new TextEncoder();
-  const keyData = encoder.encode(secretStr);
-  const key = await crypto.subtle.importKey('raw', keyData, { name: 'HMAC', hash: 'SHA-256' }, false, ['sign']);
+export async function generateToken(
+  payload: MagdTokenPayload,
+  secret: string,
+): Promise<string> {
+  if (!secret) throw new Error('MAGD_JWT_SECRET is not configured');
+  if (!validPayload(payload)) throw new Error('Invalid token payload');
 
-  const header = JSON.stringify({ alg: 'HS256', typ: 'JWT' });
-  const body = JSON.stringify(payload);
+  const header = base64UrlEncodeText(JSON.stringify({ alg: 'HS256', typ: 'JWT' }));
+  const body = base64UrlEncodeText(JSON.stringify(payload));
+  const input = `${header}.${body}`;
+  const key = await crypto.subtle.importKey(
+    'raw',
+    new TextEncoder().encode(secret),
+    { name: 'HMAC', hash: 'SHA-256' },
+    false,
+    ['sign'],
+  );
+  const signature = await crypto.subtle.sign(
+    'HMAC',
+    key,
+    new TextEncoder().encode(input),
+  );
 
-  const b64Header = btoa(header).replace(/=/g, '').replace(/\+/g, '-').replace(/\//g, '_');
-  const b64Body = btoa(body).replace(/=/g, '').replace(/\+/g, '-').replace(/\//g, '_');
-
-  const dataToSign = encoder.encode(`${b64Header}.${b64Body}`);
-  const signature = await crypto.subtle.sign('HMAC', key, dataToSign);
-  const b64Signature = btoa(String.fromCharCode(...new Uint8Array(signature)))
-    .replace(/=/g, '')
-    .replace(/\+/g, '-')
-    .replace(/\//g, '_');
-
-  return `magd_token_${b64Header}.${b64Body}.${b64Signature}`;
+  return `${TOKEN_PREFIX}${input}.${base64UrlEncodeBytes(new Uint8Array(signature))}`;
 }
 
-export async function verifyToken(token: string, secretStr = 'magd_default_secret'): Promise<{ sub: string; exp: number } | null> {
-  if (!token || !token.startsWith('magd_token_')) return null;
+export async function verifyToken(
+  token: string,
+  secret: string,
+): Promise<MagdTokenPayload | null> {
+  if (!secret || typeof token !== 'string' || !token.startsWith(TOKEN_PREFIX)) {
+    return null;
+  }
 
-  const rawToken = token.replace('magd_token_', '');
-  const parts = rawToken.split('.');
+  const parts = token.slice(TOKEN_PREFIX.length).split('.');
   if (parts.length !== 3) return null;
 
-  const [b64Header, b64Body, b64Signature] = parts;
-  const encoder = new TextEncoder();
-  const keyData = encoder.encode(secretStr);
-  const key = await crypto.subtle.importKey('raw', keyData, { name: 'HMAC', hash: 'SHA-256' }, false, ['verify']);
-
-  const dataToVerify = encoder.encode(`${b64Header}.${b64Body}`);
-
   try {
-    const binarySignature = new Uint8Array(
-      atob(b64Signature.replace(/-/g, '+').replace(/_/g, '/'))
-        .split('')
-        .map(c => c.charCodeAt(0))
+    const [headerPart, bodyPart, signaturePart] = parts;
+    const header = JSON.parse(base64UrlDecodeText(headerPart)) as Record<string, unknown>;
+    if (header.alg !== 'HS256' || header.typ !== 'JWT') return null;
+
+    const signature = base64UrlDecodeBytes(signaturePart);
+    if (signature.length !== 32) return null;
+
+    const key = await crypto.subtle.importKey(
+      'raw',
+      new TextEncoder().encode(secret),
+      { name: 'HMAC', hash: 'SHA-256' },
+      false,
+      ['verify'],
     );
+    const valid = await crypto.subtle.verify(
+      'HMAC',
+      key,
+      signature,
+      new TextEncoder().encode(`${headerPart}.${bodyPart}`),
+    );
+    if (!valid) return null;
 
-    const isValid = await crypto.subtle.verify('HMAC', key, binarySignature, dataToVerify);
-    if (!isValid) return null;
-
-    const payload = JSON.parse(atob(b64Body.replace(/-/g, '+').replace(/_/g, '/')));
-    if (payload.exp && Date.now() > payload.exp) return null;
-
-    return payload;
+    const payload = JSON.parse(base64UrlDecodeText(bodyPart)) as unknown;
+    return validPayload(payload) ? payload : null;
   } catch {
     return null;
   }

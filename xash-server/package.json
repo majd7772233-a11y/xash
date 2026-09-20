@@ -1,17 +1,21 @@
 {
   "name": "xash-server",
-  "version": "1.0.0",
+  "version": "2.0.0",
+  "private": true,
   "type": "module",
-  "description": "MAGD Multiplayer Platform backend for Xash3D FWGS",
   "main": "src/index.ts",
   "scripts": {
     "dev": "wrangler dev",
     "deploy": "wrangler deploy",
-    "test": "node --test"
+    "check": "tsc --noEmit",
+    "test": "tsx --test tests/*.test.ts",
+    "types": "wrangler types"
   },
   "devDependencies": {
-    "@cloudflare/workers-types": "^4.20241022.0",
-    "typescript": "^5.3.3",
-    "wrangler": "^3.80.0"
+    "@cloudflare/workers-types": "5.20260917.1",
+    "@types/node": "22.20.3",
+    "tsx": "4.23.13",
+    "typescript": "7.0.2",
+    "wrangler": "4.133.0"
   }
 }

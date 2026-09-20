@@ -1,19 +1,35 @@
-import assert from 'node:assert';
+import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { generateToken, verifyToken } from '../src/auth.ts';
 
-test('HMAC Token Generation and Expiration Verification', async () => {
-  const exp = Date.now() + 60000;
-  const token = await generateToken({ sub: 'user_123', exp });
+test('token is bound to the room', async () => {
+  const token = await generateToken({
+    sub: 'host-1',
+    exp: Date.now() + 60_000,
+    role: 'host',
+    room: 'MAGD-AAAA',
+  }, 'secret');
+  const payload = await verifyToken(token, 'secret');
+  assert.equal(payload?.room, 'MAGD-AAAA');
+  assert.equal(payload?.role, 'host');
+});
 
-  assert.ok(token.startsWith('magd_token_'));
+test('wrong secret fails', async () => {
+  const token = await generateToken({
+    sub: 'client-1',
+    exp: Date.now() + 60_000,
+    role: 'client',
+    room: 'MAGD-AAAA',
+  }, 'a');
+  assert.equal(await verifyToken(token, 'b'), null);
+});
 
-  const verified = await verifyToken(token);
-  assert.notStrictEqual(verified, null);
-  assert.strictEqual(verified!.sub, 'user_123');
-
-  // Expired token test
-  const expiredToken = await generateToken({ sub: 'user_123', exp: Date.now() - 1000 });
-  const verifiedExpired = await verifyToken(expiredToken);
-  assert.strictEqual(verifiedExpired, null);
+test('expired token fails', async () => {
+  const token = await generateToken({
+    sub: 'client-1',
+    exp: Date.now() - 1,
+    role: 'client',
+    room: 'MAGD-AAAA',
+  }, 'secret').catch(() => null);
+  assert.equal(token, null);
 });
