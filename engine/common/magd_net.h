@@ -1,9 +1,9 @@
 /*
  * magd_net.h - MAGD Network Abstraction Layer
  *
- * The MAGD transport wraps Xash datagrams in a small binary envelope and
- * carries them over a WebSocket tunnel. LAN/direct-IP operation stays
- * unchanged; MAGD is only active when the mode is TUNNEL.
+ * MAGD wraps Xash UDP datagrams in a small binary envelope and carries them
+ * through a WSS/WebSocket tunnel. LAN and direct-IP networking remain owned
+ * by the normal Xash networking layer.
  */
 #ifndef MAGD_NET_H
 #define MAGD_NET_H
@@ -72,6 +72,14 @@ extern convar_t magd_server_url;
 extern convar_t magd_room_code;
 extern convar_t magd_auth_token;
 extern convar_t magd_room_password;
+extern convar_t magd_room_name;
+extern convar_t magd_room_map;
+extern convar_t magd_room_game;
+extern convar_t magd_host_name;
+extern convar_t magd_max_players;
+extern convar_t magd_reconnect;
+extern convar_t magd_auto_connect;
+extern convar_t magd_allow_insecure_ws;
 
 void MAGD_Init(void);
 void MAGD_Shutdown(void);

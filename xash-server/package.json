@@ -1,15 +1,15 @@
 {
   "name": "xash-server",
-  "version": "1.2.0",
+  "version": "2.0.0",
   "private": true,
   "type": "module",
   "main": "src/index.ts",
   "scripts": {
     "dev": "wrangler dev",
     "deploy": "wrangler deploy",
-    "types": "wrangler types",
     "check": "tsc --noEmit",
-    "test": "tsx --test tests/*.test.ts"
+    "test": "tsx --test tests/*.test.ts",
+    "types": "wrangler types"
   },
   "devDependencies": {
     "@cloudflare/workers-types": "5.20260917.1",

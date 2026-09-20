@@ -1,16 +1,9 @@
 {
   "$schema": "node_modules/wrangler/config-schema.json",
-
   "name": "xash-server",
-
   "main": "src/index.ts",
-
-  /*
-   * We use the current platform date so
-   * current Durable Object/WebSocket
-   * behavior is explicit.
-   */
-  "compatibility_date": "2026-09-17",
+  "compatibility_date": "2026-09-18",
+  "workers_dev": true,
 
   "durable_objects": {
     "bindings": [
@@ -25,26 +18,14 @@
     ]
   },
 
-  /*
-   * Fresh SQLite-backed Durable Object
-   * namespaces.
-   *
-   * IMPORTANT:
-   * This is for the new/local deployment
-   * we are preparing. If a namespace with
-   * the same class already exists in your
-   * Cloudflare account using the legacy
-   * KV-backed backend, we will handle that
-   * migration separately instead of blindly
-   * overwriting it.
-   */
-  "migrations": [
-    {
-      "tag": "v1",
-      "new_sqlite_classes": [
-        "MAGDRoomObject",
-        "MAGDRegistryObject"
-      ]
+  "exports": {
+    "MAGDRoomObject": {
+      "type": "durable-object",
+      "storage": "sqlite"
+    },
+    "MAGDRegistryObject": {
+      "type": "durable-object",
+      "storage": "sqlite"
     }
-  ]
+  }
 }
