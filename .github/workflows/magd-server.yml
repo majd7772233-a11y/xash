@@ -1,69 +1,132 @@
-name: MAGD Server CI
+name: MAGD Server
 
 on:
   push:
+    branches:
+      - New
     paths:
-      - 'xash-server/**'
-      - '.github/workflows/magd-server.yml'
+      - "xash-server/**"
+      - ".github/workflows/magd-server.yml"
+
   pull_request:
     paths:
-      - 'xash-server/**'
-      - '.github/workflows/magd-server.yml'
+      - "xash-server/**"
+      - ".github/workflows/magd-server.yml"
+
   workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: magd-server-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  MAGD_BASE_URL: https://xash-server.magd.workers.dev
 
 jobs:
   validate:
-    name: Typecheck and tests
+    name: Validate server
     runs-on: ubuntu-latest
+
     defaults:
       run:
         working-directory: xash-server
+
     steps:
       - name: Checkout
         uses: actions/checkout@v6
 
-      - name: Setup Node
+      - name: Setup Node.js
         uses: actions/setup-node@v5
         with:
           node-version: 22
-          cache: npm
-          cache-dependency-path: xash-server/package.json
 
       - name: Install dependencies
-        run: npm install
+        run: npm install --no-audit --no-fund
 
       - name: Typecheck
         run: npm run check
 
-      - name: Unit tests
+      - name: Run tests
         run: npm test
 
       - name: Wrangler dry run
         run: npx wrangler deploy --dry-run
 
   deploy:
-    name: Manual production deploy
-    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/New'
+    name: Deploy to Cloudflare
     needs: validate
+    if: >
+      github.ref == 'refs/heads/New' &&
+      (
+        github.event_name == 'push' ||
+        github.event_name == 'workflow_dispatch'
+      )
+
     runs-on: ubuntu-latest
+
     defaults:
       run:
         working-directory: xash-server
-    environment: production
+
     steps:
       - name: Checkout
         uses: actions/checkout@v6
 
-      - name: Setup Node
+      - name: Setup Node.js
         uses: actions/setup-node@v5
         with:
           node-version: 22
 
       - name: Install dependencies
-        run: npm install
+        run: npm install --no-audit --no-fund
 
       - name: Deploy Worker
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
         run: npx wrangler deploy
+
+  health:
+    name: Verify deployed server
+    needs: deploy
+    if: >
+      github.ref == 'refs/heads/New' &&
+      (
+        github.event_name == 'push' ||
+        github.event_name == 'workflow_dispatch'
+      )
+
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Wait for deployment
+        run: sleep 5
+
+      - name: Health check
+        env:
+          MAGD_BASE_URL: ${{ env.MAGD_BASE_URL }}
+        run: |
+          set -e
+
+          for attempt in 1 2 3 4 5 6 7 8 9 10; do
+            echo "Health check attempt ${attempt}/10..."
+
+            if curl \
+              --fail \
+              --show-error \
+              --silent \
+              --max-time 15 \
+              "${MAGD_BASE_URL}/api/v1/health"; then
+              echo
+              echo "MAGD server is responding."
+              exit 0
+            fi
+
+            sleep 5
+          done
+
+          echo "MAGD server health check failed."
+          exit 1
