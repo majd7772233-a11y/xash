@@ -3,7 +3,9 @@ export const MAGD_HEADER_SIZE = 5;
 export const MAGD_GAME_ENVELOPE_SIZE = 2;
 export const MAGD_MAX_PACKET_SIZE = 16_384;
 export const MAGD_MAX_MESSAGE_SIZE =
-  MAGD_HEADER_SIZE + MAGD_GAME_ENVELOPE_SIZE + MAGD_MAX_PACKET_SIZE;
+  MAGD_HEADER_SIZE +
+  MAGD_GAME_ENVELOPE_SIZE +
+  MAGD_MAX_PACKET_SIZE;
 
 export const MagdMessageType = {
   HELLO: 0x01,
@@ -45,33 +47,56 @@ export function createMessage(
     throw new RangeError('MAGD payload is too large');
   }
 
-  const packet = new Uint8Array(MAGD_HEADER_SIZE + payload.byteLength);
+  const packet = new Uint8Array(
+    MAGD_HEADER_SIZE + payload.byteLength,
+  );
+
   const view = new DataView(packet.buffer);
+
   view.setUint16(0, MAGD_MAGIC, false);
   view.setUint8(2, type);
   view.setUint16(3, payload.byteLength, false);
+
   packet.set(payload, MAGD_HEADER_SIZE);
+
   return packet;
 }
 
-export function parseHeader(buffer: ArrayBuffer): MagdHeader | null {
-  if (buffer.byteLength < MAGD_HEADER_SIZE) return null;
+export function parseHeader(
+  buffer: ArrayBufferLike,
+): MagdHeader | null {
+  if (buffer.byteLength < MAGD_HEADER_SIZE) {
+    return null;
+  }
+
   const view = new DataView(buffer);
+
   const magic = view.getUint16(0, false);
   const type = view.getUint8(2) as MagdMessageTypeValue;
   const length = view.getUint16(3, false);
 
-  if (magic !== MAGD_MAGIC || buffer.byteLength !== MAGD_HEADER_SIZE + length) {
+  if (
+    magic !== MAGD_MAGIC ||
+    buffer.byteLength !== MAGD_HEADER_SIZE + length
+  ) {
     return null;
   }
 
-  if (type === MagdMessageType.GAME_DATAGRAM &&
-      (length < MAGD_GAME_ENVELOPE_SIZE ||
-       length > MAGD_GAME_ENVELOPE_SIZE + MAGD_MAX_PACKET_SIZE)) {
+  if (
+    type === MagdMessageType.GAME_DATAGRAM &&
+    (
+      length < MAGD_GAME_ENVELOPE_SIZE ||
+      length > MAGD_GAME_ENVELOPE_SIZE + MAGD_MAX_PACKET_SIZE
+    )
+  ) {
     return null;
   }
 
-  return { magic, type, length };
+  return {
+    magic,
+    type,
+    length,
+  };
 }
 
 export function createGameDatagram(
@@ -82,28 +107,60 @@ export function createGameDatagram(
   if (data.byteLength > MAGD_MAX_PACKET_SIZE) {
     throw new RangeError('Game datagram is too large');
   }
-  if (!Number.isInteger(flags) || flags < 0 || flags > 0xff) {
+
+  if (
+    !Number.isInteger(flags) ||
+    flags < 0 ||
+    flags > 0xff
+  ) {
     throw new RangeError('Invalid MAGD flags');
   }
-  if (!Number.isInteger(peerId) || peerId < 0 || peerId > 0xff) {
+
+  if (
+    !Number.isInteger(peerId) ||
+    peerId < 0 ||
+    peerId > 0xff
+  ) {
     throw new RangeError('Invalid MAGD peer id');
   }
 
-  const payload = new Uint8Array(MAGD_GAME_ENVELOPE_SIZE + data.byteLength);
+  const payload = new Uint8Array(
+    MAGD_GAME_ENVELOPE_SIZE + data.byteLength,
+  );
+
   payload[0] = flags;
   payload[1] = peerId;
-  payload.set(data, MAGD_GAME_ENVELOPE_SIZE);
-  return createMessage(MagdMessageType.GAME_DATAGRAM, payload);
+
+  payload.set(
+    data,
+    MAGD_GAME_ENVELOPE_SIZE,
+  );
+
+  return createMessage(
+    MagdMessageType.GAME_DATAGRAM,
+    payload,
+  );
 }
 
-export function parseGameDatagram(buffer: ArrayBuffer): GameDatagram | null {
+export function parseGameDatagram(
+  buffer: ArrayBufferLike,
+): GameDatagram | null {
   const header = parseHeader(buffer);
-  if (!header || header.type !== MagdMessageType.GAME_DATAGRAM ||
-      header.length < MAGD_GAME_ENVELOPE_SIZE) {
+
+  if (
+    !header ||
+    header.type !== MagdMessageType.GAME_DATAGRAM ||
+    header.length < MAGD_GAME_ENVELOPE_SIZE
+  ) {
     return null;
   }
 
-  const payload = new Uint8Array(buffer, MAGD_HEADER_SIZE, header.length);
+  const payload = new Uint8Array(
+    buffer,
+    MAGD_HEADER_SIZE,
+    header.length,
+  );
+
   return {
     flags: payload[0],
     peerId: payload[1],
