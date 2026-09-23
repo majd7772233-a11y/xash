@@ -3,7 +3,7 @@ name: MAGD Server
 on:
   push:
     branches:
-      - New
+      - master
     paths:
       - "xash-server/**"
       - ".github/workflows/magd-server.yml"
@@ -59,7 +59,7 @@ jobs:
     name: Deploy to Cloudflare
     needs: validate
     if: >
-      github.ref == 'refs/heads/New' &&
+      github.ref == 'refs/heads/master' &&
       (
         github.event_name == 'push' ||
         github.event_name == 'workflow_dispatch'
@@ -93,7 +93,7 @@ jobs:
     name: Verify deployed server
     needs: deploy
     if: >
-      github.ref == 'refs/heads/New' &&
+      github.ref == 'refs/heads/master' &&
       (
         github.event_name == 'push' ||
         github.event_name == 'workflow_dispatch'
