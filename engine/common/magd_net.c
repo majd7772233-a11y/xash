@@ -52,6 +52,23 @@ CVAR_DEFINE(magd_auto_connect, "magd_auto_connect", "1", FCVAR_ARCHIVE,
 	"After joining a room, connect the Xash client to the virtual MAGD host");
 CVAR_DEFINE(magd_allow_insecure_ws, "magd_allow_insecure_ws", "0", 0,
 	"Allow plain ws:// only for local debugging; keep disabled in production");
+CVAR_DEFINE(magd_auto_start_server, "magd_auto_start_server", "1", FCVAR_ARCHIVE,
+	"Automatically start the local Xash server after creating a MAGD room");
+
+CVAR_DEFINE(magd_connection_state, "magd_connection_state", "disconnected", 0,
+	"Current MAGD connection state");
+
+CVAR_DEFINE(magd_last_error, "magd_last_error", "", 0,
+	"Last MAGD connection error");
+
+CVAR_DEFINE(magd_room_list_revision, "magd_room_list_revision", "0", 0,
+	"Increments whenever the MAGD room cache is refreshed");
+
+CVAR_DEFINE(magd_room_list_state, "magd_room_list_state", "idle", 0,
+	"Current MAGD room list refresh state");
+
+CVAR_DEFINE(magd_room_list_error, "magd_room_list_error", "", 0,
+	"Last MAGD room list error");
 
 #define MAGD_RX_BUFFER_SIZE (128 * 1024)
 #define MAGD_FRAGMENT_SIZE (MAGD_MAX_PACKET_SIZE + 32)
@@ -65,6 +82,8 @@ CVAR_DEFINE(magd_allow_insecure_ws, "magd_allow_insecure_ws", "0", 0,
 #define MAGD_KEEPALIVE_INTERVAL 20.0
 #define MAGD_KEEPALIVE_TIMEOUT 65.0
 #define MAGD_VIRTUAL_HOST_PORT 27015
+#define MAGD_ROOM_LIST_FILE "magd_rooms.json"
+#define MAGD_ROOM_LIST_MAX_SIZE (2 * 1024 * 1024)
 
 typedef enum magd_state_e
 {
@@ -89,6 +108,7 @@ static qboolean g_host = false;
 static qboolean g_wanted = false;
 static qboolean g_auto_connect_pending = false;
 static qboolean g_welcome_seen = false;
+static qboolean g_start_server_pending = false;
 
 static double g_connect_started = 0.0;
 static double g_next_retry = 0.0;
@@ -501,6 +521,16 @@ const char *MAGD_MapAddressToSession(const netadr_t *adr)
 	return NULL;
 }
 
+static void MAGD_SetConnectionState(const char *state, const char *error)
+{
+	Cvar_DirectSet(&magd_connection_state, state && state[0] ? state : "disconnected");
+
+	if (error && error[0])
+		Cvar_DirectSet(&magd_last_error, error);
+	else
+		Cvar_DirectSet(&magd_last_error, "");
+}
+
 /* ------------------------------------------------------------------------- */
 /* Transport cleanup / retry                                                 */
 /* ------------------------------------------------------------------------- */
@@ -541,25 +571,39 @@ static void MAGD_ResetTransport(void)
 static void MAGD_ScheduleRetry(const char *reason)
 {
 	double delay;
+	qboolean reconnect;
 
 	if (reason && reason[0])
 		Con_Printf(S_WARN "[MAGD] %s\n", reason);
 
 	MAGD_ResetTransport();
 
-	if (!g_wanted || !magd_reconnect.value)
+	reconnect = g_wanted && magd_reconnect.value;
+
+	if (!reconnect)
 	{
 		g_state = MAGD_STATE_IDLE;
+
+		if (g_wanted)
+			MAGD_SetConnectionState("error", reason);
+		else
+			MAGD_SetConnectionState("disconnected", reason);
+
 		return;
 	}
 
 	delay = MAGD_RECONNECT_MIN * (double)(1 << bound(0, g_retry_count, 4));
+
 	if (delay > MAGD_RECONNECT_MAX)
 		delay = MAGD_RECONNECT_MAX;
+
 	++g_retry_count;
 
 	g_next_retry = MAGD_Now() + delay;
 	g_state = MAGD_STATE_BACKOFF;
+
+	MAGD_SetConnectionState("reconnecting", reason);
+
 	Con_Printf("[MAGD] reconnect scheduled in %.1fs\n", delay);
 }
 
@@ -567,9 +611,40 @@ static void MAGD_StopTunnel(void)
 {
 	g_wanted = false;
 	g_auto_connect_pending = false;
+	g_start_server_pending = false;
+
 	MAGD_ResetTransport();
 	MAGD_ClearSessionMaps();
+
 	g_state = MAGD_STATE_IDLE;
+
+	MAGD_SetConnectionState("disconnected", NULL);
+}
+
+static qboolean MAGD_ValidRoomCode(const char *code)
+{
+	size_t len;
+
+	if (!code)
+		return false;
+
+	len = Q_strlen(code);
+
+	if (len < 3 || len > 64)
+		return false;
+
+	for (const unsigned char *p = (const unsigned char *)code; *p; ++p)
+	{
+		if (!((*p >= 'A' && *p <= 'Z') ||
+			(*p >= 'a' && *p <= 'z') ||
+			(*p >= '0' && *p <= '9') ||
+			*p == '_' || *p == '-'))
+		{
+			return false;
+		}
+	}
+
+	return true;
 }
 
 /* ------------------------------------------------------------------------- */
@@ -895,7 +970,8 @@ static qboolean MAGD_HandshakeComplete(void)
 				g_rx_len = 0;
 
 			g_state = MAGD_STATE_OPEN;
-			g_last_rx = MAGD_Now();
+            g_last_rx = MAGD_Now();
+            MAGD_SetConnectionState("connected", NULL);
 			g_last_pong = g_last_rx;
 			g_next_keepalive = g_last_rx + MAGD_KEEPALIVE_INTERVAL;
 			g_retry_count = 0;
@@ -1044,6 +1120,35 @@ static int MAGD_Recv(byte *buffer, size_t cap)
 	}
 }
 
+static void MAGD_StartLocalServer(void)
+{
+	char escaped_map[MAX_SYSPATH];
+	char escaped_name[MAX_SYSPATH];
+	int max_players;
+
+	max_players = bound(2, (int)magd_max_players.value, 32);
+
+	Com_EscapeCommand(escaped_map, magd_room_map.string, sizeof(escaped_map));
+	Com_EscapeCommand(escaped_name, magd_room_name.string, sizeof(escaped_name));
+
+	Cbuf_AddTextf(
+		"disconnect;wait;wait;wait;"
+		"hostname %s;"
+		"sv_password \"\";"
+		"maxplayers %d;"
+		"latch;"
+		"map %s\n",
+		escaped_name,
+		max_players,
+		escaped_map
+	);
+
+	Con_Printf("^2[MAGD]^7 Starting local server: %s / %s / %d players\n",
+		magd_room_name.string,
+		magd_room_map.string,
+		max_players);
+}
+
 static void MAGD_HandleApplication(const byte *data, size_t len)
 {
 	size_t payload_len;
@@ -1079,19 +1184,31 @@ static void MAGD_HandleApplication(const byte *data, size_t len)
 	}
 
 	if (type == MAGD_TYPE_WELCOME)
-	{
-		netadr_t host_adr;
-		if (!MAGD_MapSessionToAddress("host", &host_adr))
-			return;
+    {
+	netadr_t host_adr;
 
-		g_welcome_seen = true;
-		if (!g_host && g_auto_connect_pending && magd_auto_connect.value)
-		{
-			g_auto_connect_pending = false;
-			Cbuf_AddText("connect 10.254.0.1:27015\n");
-		}
+	MAGD_SetConnectionState("connected", NULL);
+
+	if (!MAGD_MapSessionToAddress("host", &host_adr))
 		return;
+
+	g_welcome_seen = true;
+
+	if (g_host && g_start_server_pending &&
+		magd_auto_start_server.value)
+	{
+		g_start_server_pending = false;
+		MAGD_StartLocalServer();
 	}
+
+	if (!g_host && g_auto_connect_pending && magd_auto_connect.value)
+	{
+		g_auto_connect_pending = false;
+		Cbuf_AddText("connect 10.254.0.1:27015\n");
+	}
+
+	return;
+    }
 
 	if (type == MAGD_TYPE_ERROR || type == MAGD_TYPE_READY)
 		return;
@@ -1264,45 +1381,79 @@ static void MAGD_SendApplicationPing(void)
 
 static void MAGD_SendQueued(void)
 {
-	byte packet[MAGD_MAX_PACKET_SIZE];
-	size_t packet_len = 0;
-	netadr_t to;
-	byte flags = 0;
-	byte peer = MAGD_PEER_BROADCAST;
-	byte envelope[MAGD_MAX_PACKET_SIZE + 2];
-	byte message[MAGD_MAX_PACKET_SIZE + 7];
-
-	if (g_data_tx_len != g_data_tx_pos)
-		return;
-	if (!MAGD_QueuePop(&g_outgoing, packet, &packet_len, &to))
-		return;
-
-	if (g_host)
+	for (int burst = 0; burst < 16; ++burst)
 	{
-		const char *session_id = MAGD_MapAddressToSession(&to);
-		if (session_id && !Q_strnicmp(session_id, "peer_", 5))
+		byte packet[MAGD_MAX_PACKET_SIZE];
+		size_t packet_len = 0;
+		netadr_t to;
+		byte flags = 0;
+		byte peer = MAGD_PEER_BROADCAST;
+		byte envelope[MAGD_MAX_PACKET_SIZE + 2];
+		byte message[MAGD_MAX_PACKET_SIZE + 7];
+
+		if (g_state != MAGD_STATE_OPEN)
+			return;
+
+		if (g_data_tx_len != g_data_tx_pos)
 		{
-			int id = Q_atoi(session_id + 5);
-			if (id >= 1 && id <= 31)
+			MAGD_FlushTx();
+
+			if (g_data_tx_len != g_data_tx_pos)
+				return;
+
+			if (g_state != MAGD_STATE_OPEN)
+				return;
+		}
+
+		if (!MAGD_QueuePop(&g_outgoing, packet, &packet_len, &to))
+			return;
+
+		if (g_host)
+		{
+			const char *session_id = MAGD_MapAddressToSession(&to);
+
+			if (session_id && !Q_strnicmp(session_id, "peer_", 5))
 			{
-				flags = MAGD_GAME_HAS_TARGET;
-				peer = (byte)id;
+				int id = Q_atoi(session_id + 5);
+
+				if (id >= 1 && id <= 31)
+				{
+					flags = MAGD_GAME_HAS_TARGET;
+					peer = (byte)id;
+				}
 			}
 		}
+
+		envelope[0] = flags;
+		envelope[1] = peer;
+
+		memcpy(envelope + 2, packet, packet_len);
+
+		message[0] = 0x4D;
+		message[1] = 0x47;
+		message[2] = MAGD_TYPE_GAME_DATAGRAM;
+		message[3] = (byte)((packet_len + 2) >> 8);
+		message[4] = (byte)(packet_len + 2);
+
+		memcpy(message + 5, envelope, packet_len + 2);
+
+		if (!MAGD_QueueWsFrame(
+			MAGD_WS_OPCODE_BINARY,
+			message,
+			packet_len + 7))
+		{
+			MAGD_QueuePush(&g_outgoing, packet, packet_len, &to);
+			return;
+		}
+
+		MAGD_FlushTx();
+
+		if (g_data_tx_len != g_data_tx_pos)
+			return;
+
+		if (g_state != MAGD_STATE_OPEN)
+			return;
 	}
-
-	envelope[0] = flags;
-	envelope[1] = peer;
-	memcpy(envelope + 2, packet, packet_len);
-	message[0] = 0x4D;
-	message[1] = 0x47;
-	message[2] = MAGD_TYPE_GAME_DATAGRAM;
-	message[3] = (byte)((packet_len + 2) >> 8);
-	message[4] = (byte)(packet_len + 2);
-	memcpy(message + 5, envelope, packet_len + 2);
-
-	if (!MAGD_QueueWsFrame(MAGD_WS_OPCODE_BINARY, message, packet_len + 7))
-		MAGD_QueuePush(&g_outgoing, packet, packet_len, &to);
 }
 
 /* ------------------------------------------------------------------------- */
@@ -1311,8 +1462,11 @@ static void MAGD_SendQueued(void)
 
 static qboolean MAGD_TryConnect(void)
 {
+	// 1. التحقق من وجود الشروط الأساسية للاتصال (الغرفة، التوكين، ورغبة الاتصال)
 	if (!g_wanted || !magd_room_code.string[0] || !magd_auth_token.string[0])
 		return false;
+
+	// 2. تحليل الرابط الخاص بالسيرفر لاستخراج Host و Port و TLS status
 	if (!MAGD_ParseServerUrl(magd_server_url.string, g_host_name, sizeof(g_host_name),
 		g_host_header, sizeof(g_host_header), &g_port, &g_use_tls))
 	{
@@ -1320,25 +1474,31 @@ static qboolean MAGD_TryConnect(void)
 		return false;
 	}
 
+	// 3. منع الاتصالات غير المشفرة Plain WebSocket إذا كان الخيار غير مسموح
 	if (!g_use_tls && !magd_allow_insecure_ws.value)
 	{
 		MAGD_ScheduleRetry("Plain ws:// is disabled; use https:// or wss://");
 		return false;
 	}
 
+	// 4. التحقق من دعم TLS في المنصة إذا كان الاتصال يطلب التشفير
 	if (g_use_tls && !HTTP_TlsAvailable())
 	{
 		MAGD_ScheduleRetry("TLS is unavailable; provide a valid CA bundle or explicitly enable debug TLS");
 		return false;
 	}
 
+	// 5. بدء عملية الاتصال الأولي وتصفير المنفذ
+	MAGD_SetConnectionState("connecting", NULL);
 	MAGD_ResetTransport();
+
 	if (!MAGD_OpenSocket())
 	{
 		MAGD_ScheduleRetry("TCP connection failed");
 		return false;
 	}
 
+	// 6. إنشاء سياق TLS للاتصال المشفر عند الحاجة
 	if (g_use_tls)
 	{
 		g_tls = HTTP_TlsNew(g_socket, g_host_name);
@@ -1347,9 +1507,14 @@ static qboolean MAGD_TryConnect(void)
 			MAGD_ScheduleRetry("Could not create TLS context");
 			return false;
 		}
+
+		// تحديث حالة الاتصال بعد إنشاء TLS بنجاح
+		MAGD_SetConnectionState("tls", NULL);
 	}
 
+	// 7. تسجيل وقت بداية الاتصال وتجهيز مصافحة الـ WebSocket
 	g_connect_started = MAGD_Now();
+
 	if (g_state != MAGD_STATE_TCP_CONNECTING && g_state != MAGD_STATE_TLS)
 	{
 		if (!MAGD_BuildHandshakeRequest())
@@ -1357,12 +1522,18 @@ static qboolean MAGD_TryConnect(void)
 			MAGD_ScheduleRetry("Could not build WebSocket handshake");
 			return false;
 		}
+
+		// تحديث حالة الاتصال بعد بناء طلب المصافحة (Handshake) بنجاح
+		MAGD_SetConnectionState("handshake", NULL);
 	}
 
+	// 8. طباعة سجل النجاح في الـ Console والبدء الفعلي
 	Con_Printf("^2[MAGD]^7 Connecting room ^3%s^7 to %s...\n",
 		magd_room_code.string, g_host_header);
+
 	return true;
 }
+
 
 /* ------------------------------------------------------------------------- */
 /* Room create / guest auth callbacks                                        */
@@ -1407,21 +1578,35 @@ static void MAGD_CreateCallback(const char *url, qboolean success,
 	(void)url;
 	(void)userdata;
 
-	if (!success || !data || !size || !MAGD_JsonString(data, size, "hostToken", token, sizeof(token)))
+	// Failure branch: التعامل مع فشل إنشاء الغرفة أو فقدان التوكين
+	if (!success || !data || !size ||
+		!MAGD_JsonString(data, size, "hostToken", token, sizeof(token)))
 	{
-		Con_Printf(S_ERROR "[MAGD] room creation failed or host token missing\n");
+		Cvar_DirectSet(&magd_connection_state, "error");
+		Cvar_DirectSet(&magd_last_error,
+			"Room creation failed or host token is missing");
+
+		Con_Printf(S_ERROR
+			"[MAGD] room creation failed or host token missing\n");
+
 		return;
 	}
 
+	// Success branch: ضبط البيانات وإعداد حالة الاتصال
 	Cvar_DirectSet(&magd_auth_token, token);
 	MAGD_SetMode(MAGD_NET_MODE_TUNNEL);
 	g_host = true;
+	g_start_server_pending = magd_auto_start_server.value != 0;
 	g_auto_connect_pending = false;
 	g_retry_count = 0;
 	g_wanted = true;
 	g_next_retry = 0.0;
+
+	MAGD_SetConnectionState("connecting", NULL);
+
 	MAGD_TryConnect();
 }
+
 
 static void MAGD_GuestCallback(const char *url, qboolean success,
 	const byte *data, size_t size, void *userdata)
@@ -1430,21 +1615,35 @@ static void MAGD_GuestCallback(const char *url, qboolean success,
 	(void)url;
 	(void)userdata;
 
-	if (!success || !data || !size || !MAGD_JsonString(data, size, "token", token, sizeof(token)))
+	// Failure branch: التعامل مع فشل توثيق الضيف أو فقدان التوكين
+	if (!success || !data || !size ||
+		!MAGD_JsonString(data, size, "token", token, sizeof(token)))
 	{
-		Con_Printf(S_ERROR "[MAGD] guest authentication failed or token missing\n");
+		Cvar_DirectSet(&magd_connection_state, "error");
+		Cvar_DirectSet(&magd_last_error,
+			"Guest authentication failed or token is missing");
+
+		Con_Printf(S_ERROR
+			"[MAGD] guest authentication failed or token missing\n");
+
 		return;
 	}
 
+	// Success branch: ضبط البيانات وإعداد حالة اتصال الضيف
 	Cvar_DirectSet(&magd_auth_token, token);
 	MAGD_SetMode(MAGD_NET_MODE_TUNNEL);
 	g_host = false;
+	g_start_server_pending = false;
 	g_auto_connect_pending = true;
 	g_retry_count = 0;
 	g_wanted = true;
 	g_next_retry = 0.0;
+
+	MAGD_SetConnectionState("connecting", NULL);
+
 	MAGD_TryConnect();
 }
+
 
 static void MAGD_CreateRoom_f(void)
 {
@@ -1453,6 +1652,10 @@ static void MAGD_CreateRoom_f(void)
 	char enc_name[768], enc_map[384], enc_game[384], enc_host[768], enc_password[1536];
 	char url[4096];
 	int max_players = bound(2, (int)magd_max_players.value, 32);
+
+	// تعيين حالة الاتصال وتصفير آخر خطأ في بداية الدالة
+	Cvar_DirectSet(&magd_connection_state, "creating");
+	Cvar_DirectSet(&magd_last_error, "");
 
 	Q_snprintf(code, sizeof(code), "MAGD-%04X", (unsigned int)COM_RandomLong(0x1000, 0xFFFF));
 	Q_strncpy(name, magd_room_name.string, sizeof(name));
@@ -1481,42 +1684,103 @@ static void MAGD_CreateRoom_f(void)
 		max_players, enc_password);
 
 	Con_Printf("^2[MAGD]^7 Creating room ^3%s^7...\n", code);
-	HTTP_GetToMemory(url, MAGD_CreateCallback, NULL);
+
+	// التحقق من إضافة الطلب للانتظار (Queue) وتعيين الخطأ عند الفشل
+	if (!HTTP_GetToMemory(url, MAGD_CreateCallback, NULL))
+	{
+		Cvar_DirectSet(&magd_connection_state, "error");
+		Cvar_DirectSet(&magd_last_error,
+			"Could not start MAGD room creation request");
+
+		Con_Printf(S_ERROR
+			"[MAGD] failed to queue room creation request\n");
+	}
 }
+
 
 static void MAGD_ConnectRoom_f(void)
 {
 	char url[1536];
 	char room[128];
+	char password[256];
+	char enc_room[256];
+	char base[1024];
+	size_t len;
 
-	if (Cmd_Argc() < 2)
+	if (Cmd_Argc() >= 2)
+		Q_strncpy(room, Cmd_Argv(1), sizeof(room));
+	else
+		Q_strncpy(room, magd_room_code.string, sizeof(room));
+
+	if (!room[0])
 	{
 		Con_Printf(S_USAGE "magd_connect <room_code> [password]\n");
 		return;
 	}
 
-	Q_strncpy(room, Cmd_Argv(1), sizeof(room));
 	for (char *p = room; *p; ++p)
-		if ((*p >= 'a' && *p <= 'z'))
+	{
+		if (*p >= 'a' && *p <= 'z')
 			*p = (char)(*p - 'a' + 'A');
+	}
+
+	if (!MAGD_ValidRoomCode(room))
+	{
+		Con_Printf(S_ERROR "[MAGD] invalid room code: %s\n", room);
+		Cvar_DirectSet(&magd_connection_state, "error");
+		Cvar_DirectSet(&magd_last_error, "Invalid MAGD room code");
+		return;
+	}
+
+	if (Cmd_Argc() >= 3)
+		Q_strncpy(password, Cmd_Argv(2), sizeof(password));
+	else
+		Q_strncpy(password, magd_room_password.string, sizeof(password));
+
+	if (!MAGD_UrlEncode(room, enc_room, sizeof(enc_room)))
+	{
+		Cvar_DirectSet(&magd_connection_state, "error");
+		Cvar_DirectSet(&magd_last_error, "Could not encode MAGD room code");
+		return;
+	}
 
 	Cvar_DirectSet(&magd_room_code, room);
-	if (Cmd_Argc() >= 3)
-		Cvar_DirectSet(&magd_room_password, Cmd_Argv(2));
-	else
-		Cvar_DirectSet(&magd_room_password, "");
-
+	Cvar_DirectSet(&magd_room_password, password);
 	Cvar_DirectSet(&magd_auth_token, "");
+
 	MAGD_StopTunnel();
 	MAGD_SetMode(MAGD_NET_MODE_TUNNEL);
+
 	g_host = false;
+	g_start_server_pending = false;
 	g_auto_connect_pending = true;
 
-	Q_snprintf(url, sizeof(url), "%s/api/v1/auth/guest?room=%s",
-		magd_server_url.string, magd_room_code.string);
+	Cvar_DirectSet(&magd_connection_state, "authenticating");
+	Cvar_DirectSet(&magd_last_error, "");
 
-	Con_Printf("^2[MAGD]^7 Authenticating guest for room ^3%s^7...\n", magd_room_code.string);
-	HTTP_GetToMemory(url, MAGD_GuestCallback, NULL);
+	Q_strncpy(base, magd_server_url.string, sizeof(base));
+
+	len = Q_strlen(base);
+	while (len > 0 && base[len - 1] == '/')
+		base[--len] = 0;
+
+	Q_snprintf(url, sizeof(url),
+		"%s/api/v1/auth/guest?room=%s",
+		base,
+		enc_room);
+
+	Con_Printf("^2[MAGD]^7 Authenticating guest for room ^3%s^7...\n",
+		magd_room_code.string);
+
+	if (!HTTP_GetToMemory(url, MAGD_GuestCallback, NULL))
+	{
+		Cvar_DirectSet(&magd_connection_state, "error");
+		Cvar_DirectSet(&magd_last_error,
+			"Could not start MAGD guest authentication request");
+
+		Con_Printf(S_ERROR
+			"[MAGD] failed to queue guest authentication request\n");
+	}
 }
 
 static void MAGD_Disconnect_f(void)
@@ -1550,16 +1814,29 @@ void MAGD_Init(void)
 	Cvar_RegisterVariable(&magd_reconnect);
 	Cvar_RegisterVariable(&magd_auto_connect);
 	Cvar_RegisterVariable(&magd_allow_insecure_ws);
+	Cvar_RegisterVariable(&magd_auto_start_server);
+    Cvar_RegisterVariable(&magd_connection_state);
+    Cvar_RegisterVariable(&magd_last_error);
+    Cvar_RegisterVariable(&magd_room_list_revision);
+    Cvar_RegisterVariable(&magd_room_list_state);
+    Cvar_RegisterVariable(&magd_room_list_error);
 
 	Cmd_AddCommand("magd_create_room", MAGD_CreateRoom_f, "Create a MAGD online room");
 	Cmd_AddCommand("magd_connect", MAGD_ConnectRoom_f, "Connect to a MAGD room");
 	Cmd_AddCommand("magd_disconnect", MAGD_Disconnect_f, "Disconnect the MAGD tunnel");
 	Cmd_AddCommand("magd_status", MAGD_Status_f, "Show MAGD tunnel status");
+	Cmd_AddCommand("magd_list_rooms", MAGD_ListRooms_f,
+	"Refresh the MAGD online room list");
+	
 
 	MAGD_QueueInit(&g_incoming);
 	MAGD_QueueInit(&g_outgoing);
 	MAGD_ClearSessionMaps();
 	MAGD_ResetTransport();
+	
+    MAGD_SetConnectionState("disconnected", NULL);
+    Cvar_DirectSet(&magd_room_list_state, "idle");
+    Cvar_DirectSet(&magd_room_list_error, "");
 
 	Con_Printf("^2[MAGD]^7 Network layer initialized\n");
 }
@@ -1593,11 +1870,13 @@ void MAGD_ProcessTunnel(void)
 	double now;
 
 	if (!magd_enabled.value)
-	{
-		if (g_state != MAGD_STATE_IDLE || g_wanted)
-			MAGD_StopTunnel();
-		return;
-	}
+    {
+	if (g_state != MAGD_STATE_IDLE || g_wanted)
+		MAGD_StopTunnel();
+
+	Cvar_DirectSet(&magd_connection_state, "disabled");
+	return;
+    }
 	if (g_mode != MAGD_NET_MODE_TUNNEL)
 		return;
 
