@@ -660,6 +660,8 @@ void Host_Frame( double time )
 	// decide the simulation time
 	if( !Host_FilterTime( time ))
 		return;
+		
+	MAGD_ProcessTunnel();
 
 	double t1 = Platform_DoubleTime();
 

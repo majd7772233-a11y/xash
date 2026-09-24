@@ -1419,7 +1419,6 @@ qboolean NET_GetPacket( netsrc_t sock, netadr_t *from, byte *data, size_t *lengt
 
 	if( MAGD_GetMode() == MAGD_NET_MODE_TUNNEL )
 	{
-		MAGD_ProcessTunnel();
 		if( MAGD_GetDatagram( data, length, from ))
 			return true;
 	}
