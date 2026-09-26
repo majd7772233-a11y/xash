@@ -41,3 +41,9 @@ popd || exit 1
 echo "Download all needed tools and Android NDK"
 yes | sdkmanager --licenses > /dev/null 2>/dev/null # who even reads licenses? :)
 sdkmanager --install build-tools\;${ANDROID_BUILD_TOOLS_VER} platform-tools platforms\;${ANDROID_PLATFORM_VER} ndk\;${ANDROID_NDK_VERSION}
+
+export ANDROID_NDK_ROOT="$ANDROID_HOME/ndk/$ANDROID_NDK_VERSION"
+export ANDROID_NDK_HOME="$ANDROID_NDK_ROOT"
+
+echo "ANDROID_NDK_ROOT=$ANDROID_NDK_ROOT" >> "$GITHUB_ENV"
+echo "ANDROID_NDK_HOME=$ANDROID_NDK_HOME" >> "$GITHUB_ENV"

@@ -6,9 +6,9 @@ jobs:
 #    steps:
 #    - name: Cleanup
 #      run: rm -rf .* || true
-  build:
+    build:
     runs-on: ${{ matrix.os }}
-    continue-on-error: true
+    continue-on-error: ${{ matrix.targetos != 'android' }}
     strategy:
       fail-fast: false
       matrix:
@@ -92,7 +92,6 @@ jobs:
         path: artifacts/*
   flatpak:
     runs-on: ubuntu-latest
-    continue-on-error: true
     strategy:
       matrix:
         include:
@@ -110,6 +109,12 @@ jobs:
       with:
         bundle: ${{ matrix.app }}.flatpak
         manifest-path: scripts/flatpak/${{ matrix.app }}.yml
+    - name: Upload Flatpak artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: flatpak-${{ matrix.app }}
+          path: ${{ matrix.app }}.flatpak
+          if-no-files-found: error
   release:
     name: "Upload releases"
     runs-on: ubuntu-latest

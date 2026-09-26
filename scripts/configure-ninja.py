@@ -21,15 +21,41 @@ import io
 
 
 def check_repo(name, branch, url, path):
-	if not os.path.exists(path):
-		print("{} not found. Cloning...".format(name))
-		git_exec = ["git", "clone", "--branch", branch, url, path]
-		git_process = subprocess.Popen(git_exec)
-		git_process.communicate()
+	if os.path.exists(path):
+		return
+
+	print("{} not found. Cloning...".format(name))
+
+	git_exec = [
+		"git",
+		"clone",
+		"--branch",
+		branch,
+		url,
+		path
+	]
+
+	result = subprocess.run(git_exec)
+
+	if result.returncode != 0:
+		raise RuntimeError(
+			"Failed to clone {}".format(name)
+		)
 
 
-def run_cmake(root, out, toolchain, abi, build_type, ndk_root, min_sdk, *args):
-	cmake_exec = ["cmake", "-H{}".format(root),
+def run_cmake(
+	root,
+	out,
+	toolchain,
+	abi,
+	build_type,
+	ndk_root,
+	min_sdk,
+	*args
+):
+	cmake_exec = [
+		"cmake",
+		"-H{}".format(root),
 		"-DCMAKE_BUILD_TYPE={}".format(build_type),
 		"-DCMAKE_TOOLCHAIN_FILE={}".format(toolchain),
 		"-DANDROID_ABI={}".format(abi),
@@ -38,81 +64,247 @@ def run_cmake(root, out, toolchain, abi, build_type, ndk_root, min_sdk, *args):
 		"-DCMAKE_EXPORT_COMPILE_COMMANDS=ON",
 		"-DCMAKE_SYSTEM_NAME=Android",
 		"-DCMAKE_SYSTEM_VERSION={}".format(min_sdk),
-		"-B{}".format(out), "-GNinja"]
+		"-B{}".format(out),
+		"-GNinja"
+	]
 
 	cmake_exec.extend(args)
-	cmake_process = subprocess.Popen(cmake_exec)
-	cmake_process.communicate()
+
+	result = subprocess.run(cmake_exec)
+
+	if result.returncode != 0:
+		raise RuntimeError(
+			"CMake configuration failed for {}".format(root)
+		)
 
 
 def main():
 	parser = argparse.ArgumentParser()
-	parser.add_argument("wscript_path")
-	parser.add_argument("--variant")
-	parser.add_argument("--abi")
-	parser.add_argument("--configuration-dir")
-	parser.add_argument("--ndk-version")
-	parser.add_argument("--min-sdk-version")
-	parser.add_argument("--ndk-root")
+
+	parser.add_argument(
+		"wscript_path"
+	)
+
+	parser.add_argument(
+		"--variant"
+	)
+
+	parser.add_argument(
+		"--abi"
+	)
+
+	parser.add_argument(
+		"--configuration-dir"
+	)
+
+	parser.add_argument(
+		"--ndk-version"
+	)
+
+	parser.add_argument(
+		"--min-sdk-version"
+	)
+
+	parser.add_argument(
+		"--ndk-root"
+	)
 
 	args, unknown = parser.parse_known_args()
 
 	abi = args.abi
 
-	cmake_build_type = "Debug" if args.variant in ["debug", "asan"] else "Release"
-	cmake_toolchain_path = os.path.join(args.ndk_root, "build", "cmake", "android.toolchain.cmake")
+	cmake_build_type = (
+		"Debug"
+		if args.variant in ["debug", "asan"]
+		else "Release"
+	)
+
+	cmake_toolchain_path = os.path.join(
+		args.ndk_root,
+		"build",
+		"cmake",
+		"android.toolchain.cmake"
+	)
 
 	# configure SDL2
-	sdl_path = os.path.join(args.wscript_path, "3rdparty", "SDL")
-	check_repo("SDL", "release-2.32.8", "https://github.com/libsdl-org/SDL", sdl_path)
 
-	sdl_out_path = os.path.join(args.configuration_dir, "SDL")
+	sdl_path = os.path.join(
+		args.wscript_path,
+		"3rdparty",
+		"SDL"
+	)
 
-	run_cmake(sdl_path, sdl_out_path, cmake_toolchain_path, abi, cmake_build_type, args.ndk_root, args.min_sdk_version,
-			  "-DSDL_RENDER=OFF", "-DSDL_POWER=OFF", "-DSDL_VULKAN=OFF", "-DSDL_DISKAUDIO=OFF",
-			  "-DSDL_DUMMYAUDIO=OFF", "-DSDL_DUMMYVIDEO=OFF",
-			  "-DSDL_VULKAN=OFF", "-DSDL_OFFSCREEN=OFF", "-DSDL_STATIC=OFF")
+	check_repo(
+		"SDL",
+		"release-2.32.8",
+		"https://github.com/libsdl-org/SDL",
+		sdl_path
+	)
+
+	sdl_out_path = os.path.join(
+		args.configuration_dir,
+		"SDL"
+	)
+
+	run_cmake(
+		sdl_path,
+		sdl_out_path,
+		cmake_toolchain_path,
+		abi,
+		cmake_build_type,
+		args.ndk_root,
+		args.min_sdk_version,
+		"-DSDL_RENDER=OFF",
+		"-DSDL_POWER=OFF",
+		"-DSDL_VULKAN=OFF",
+		"-DSDL_DISKAUDIO=OFF",
+		"-DSDL_DUMMYAUDIO=OFF",
+		"-DSDL_DUMMYVIDEO=OFF",
+		"-DSDL_OFFSCREEN=OFF",
+		"-DSDL_STATIC=OFF"
+	)
 
 	# configure hlsdk-portable
-	hlsdk_path = os.path.join(args.wscript_path, "3rdparty", "hlsdk-portable")
-	check_repo("hlsdk-portable", "mobile_hacks", "https://github.com/FWGS/hlsdk-portable", hlsdk_path)
 
-	hlsdk_out_path = os.path.join(args.configuration_dir, "hlsdk-portable")
+	hlsdk_path = os.path.join(
+		args.wscript_path,
+		"3rdparty",
+		"hlsdk-portable"
+	)
 
-	run_cmake(hlsdk_path, hlsdk_out_path, cmake_toolchain_path, abi, cmake_build_type, args.ndk_root,
-			  args.min_sdk_version, "-DANDROID_APK=ON")
+	check_repo(
+		"hlsdk-portable",
+		"mobile_hacks",
+		"https://github.com/FWGS/hlsdk-portable",
+		hlsdk_path
+	)
+
+	hlsdk_out_path = os.path.join(
+		args.configuration_dir,
+		"hlsdk-portable"
+	)
+
+	run_cmake(
+		hlsdk_path,
+		hlsdk_out_path,
+		cmake_toolchain_path,
+		abi,
+		cmake_build_type,
+		args.ndk_root,
+		args.min_sdk_version,
+		"-DANDROID_APK=ON"
+	)
 
 	# configure mainui_cpp
-	mainui_path = os.path.join(args.wscript_path, "3rdparty", "mainui")
-	mainui_out_path = os.path.join(args.configuration_dir, "mainui")
 
-	run_cmake(mainui_path, mainui_out_path, cmake_toolchain_path, abi, cmake_build_type, args.ndk_root,
-		args.min_sdk_version, "-DBUILD_AS_PART_OF_ENGINE=ON")
+	mainui_path = os.path.join(
+		args.wscript_path,
+		"3rdparty",
+		"mainui"
+	)
+
+	mainui_out_path = os.path.join(
+		args.configuration_dir,
+		"mainui"
+	)
+
+	run_cmake(
+		mainui_path,
+		mainui_out_path,
+		cmake_toolchain_path,
+		abi,
+		cmake_build_type,
+		args.ndk_root,
+		args.min_sdk_version,
+		"-DBUILD_AS_PART_OF_ENGINE=ON"
+	)
 
 	# waf configure
-	waf_path = os.path.join(args.wscript_path, "waf")
-	out_path = os.path.join(args.configuration_dir, "xash3d-fwgs")
 
-	waf_build_type = "debug" if args.variant in ["debug", "asan"] else "release"
+	waf_path = os.path.join(
+		args.wscript_path,
+		"waf"
+	)
+
+	out_path = os.path.join(
+		args.configuration_dir,
+		"xash3d-fwgs"
+	)
+
+	waf_build_type = (
+		"debug"
+		if args.variant in ["debug", "asan"]
+		else "release"
+	)
 
 	env = os.environ.copy()
-	env["WAFLOCK"] = ".lock-waf_android_{}_build".format(abi)
+
+	env["WAFLOCK"] = (
+		".lock-waf_android_{}_build".format(abi)
+	)
+
 	env["ANDROID_NDK"] = args.ndk_root
-	env["BUILD_CMAKE_LIBRARY_OUTPUT_DIRECTORY"] = sdl_out_path
 
-	waf_exec = [sys.executable, waf_path, "configure", "-t", args.wscript_path, "-o", out_path,
-				"-T", waf_build_type, "--android={},,{}".format(abi, args.min_sdk_version), "-s",
-				sdl_path, "--skip-sdl2-sanity-check", "--enable-bundled-deps", "ninja"]
+	env["BUILD_CMAKE_LIBRARY_OUTPUT_DIRECTORY"] = (
+		sdl_out_path
+	)
 
-	process = subprocess.Popen(waf_exec, env=env)
-	process.communicate()
+	waf_exec = [
+		sys.executable,
+		waf_path,
+		"configure",
+		"-t",
+		args.wscript_path,
+		"-o",
+		out_path,
+		"-T",
+		waf_build_type,
+		"--android={},,{}".format(
+			abi,
+			args.min_sdk_version
+		),
+		"-s",
+		sdl_path,
+		"--skip-sdl2-sanity-check",
+		"--enable-bundled-deps",
+		"ninja"
+	]
 
-	with io.open(os.path.join(args.configuration_dir, "build.ninja.txt"), "w", encoding="utf-8") as f:
-		f.write(os.path.join(out_path, "build.ninja"))
+	result = subprocess.run(
+		waf_exec,
+		env=env
+	)
 
-	# required for Android Studio
+	if result.returncode != 0:
+		raise RuntimeError(
+			"Waf configuration failed"
+		)
+
+	with io.open(
+		os.path.join(
+			args.configuration_dir,
+			"build.ninja.txt"
+		),
+		"w",
+		encoding="utf-8"
+	) as f:
+
+		f.write(
+			os.path.join(
+				out_path,
+				"build.ninja"
+			)
+		)
+
 	return 0
 
 
 if __name__ == "__main__":
-	sys.exit(main())
+	try:
+		sys.exit(main())
+	except Exception as exc:
+		print(
+			"configure-ninja.py: {}".format(exc),
+			file=sys.stderr
+		)
+		sys.exit(1)

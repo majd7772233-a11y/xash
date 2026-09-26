@@ -18,15 +18,47 @@ import subprocess
 import sys
 
 
+def run_command(command):
+	result = subprocess.run(command)
+
+	if result.returncode != 0:
+		raise RuntimeError(
+			"Command failed with exit code {}".format(
+				result.returncode
+			)
+		)
+
+
 def run_cmake(bin_path, libs, inst_path):
-	cmake_exec = ["cmake", "--build", bin_path]
-	cmake_process = subprocess.Popen(cmake_exec)
-	cmake_process.communicate()
+	if not os.path.isdir(bin_path):
+		raise RuntimeError(
+			"CMake build directory does not exist: {}".format(
+				bin_path
+			)
+		)
 
 	if libs:
+		run_command([
+			"cmake",
+			"--build",
+			bin_path
+		])
+
 		for lib in libs:
-			src = os.path.join(bin_path, *lib.split("/"))
-			dest = os.path.join(inst_path, lib.split("/")[-1])
+			src = os.path.join(
+				bin_path,
+				*lib.split("/")
+			)
+
+			dest = os.path.join(
+				inst_path,
+				lib.split("/")[-1]
+			)
+
+			if not os.path.isfile(src):
+				raise RuntimeError(
+					"CMake output is missing: {}".format(src)
+				)
 
 			dest_dir = os.path.dirname(dest)
 
@@ -34,50 +66,156 @@ def run_cmake(bin_path, libs, inst_path):
 				os.makedirs(dest_dir)
 
 			shutil.copyfile(src, dest)
+
 	else:
-		cmake_exec = ["cmake", "--install", bin_path, "--prefix", inst_path]
-		cmake_process = subprocess.Popen(cmake_exec)
-		cmake_process.communicate()
+		run_command([
+			"cmake",
+			"--build",
+			bin_path
+		])
+
+		run_command([
+			"cmake",
+			"--install",
+			bin_path,
+			"--prefix",
+			inst_path
+		])
+
 
 def main():
 	parser = argparse.ArgumentParser()
-	parser.add_argument("cmd")
-	parser.add_argument("top_dir")
-	parser.add_argument("out_dir")
-	parser.add_argument("waflock")
-	parser.add_argument("--targets", type=str, default="")
+
+	parser.add_argument(
+		"cmd"
+	)
+
+	parser.add_argument(
+		"top_dir"
+	)
+
+	parser.add_argument(
+		"out_dir"
+	)
+
+	parser.add_argument(
+		"waflock"
+	)
+
+	parser.add_argument(
+		"--targets",
+		type=str,
+		default=""
+	)
 
 	args = parser.parse_args()
 
-	waf_path = os.path.join(args.top_dir, "waf")
+	waf_path = os.path.join(
+		args.top_dir,
+		"waf"
+	)
 
 	env = os.environ.copy()
+
 	env["WAFLOCK"] = args.waflock
 
-	waf_exec = [sys.executable, waf_path, args.cmd, "-t", args.top_dir]
+	waf_exec = [
+		sys.executable,
+		waf_path,
+		args.cmd,
+		"-t",
+		args.top_dir
+	]
 
 	if args.targets:
-		waf_exec += ["--targets={}".format(args.targets)]
+		waf_exec += [
+			"--targets={}".format(
+				args.targets
+			)
+		]
+
 	else:
 		# build SDL2 and hlsdk-portable with cmake
-		sdl_bin_path = os.path.join(args.out_dir, "SDL")
-		hlsdk_bin_path = os.path.join(args.out_dir, "hlsdk-portable")
-		mainui_bin_path = os.path.join(args.out_dir, "mainui")
 
-		abi = args.waflock.replace(".lock-waf_android_", "").replace("_build", "")
-		inst_path = os.path.join(args.top_dir, "android", "app", "src", "main", "jniLibs", abi)
+		sdl_bin_path = os.path.join(
+			args.out_dir,
+			"SDL"
+		)
+
+		hlsdk_bin_path = os.path.join(
+			args.out_dir,
+			"hlsdk-portable"
+		)
+
+		mainui_bin_path = os.path.join(
+			args.out_dir,
+			"mainui"
+		)
+
+		abi = (
+			args.waflock
+			.replace(
+				".lock-waf_android_",
+				""
+			)
+			.replace(
+				"_build",
+				""
+			)
+		)
+
+		inst_path = os.path.join(
+			args.top_dir,
+			"android",
+			"app",
+			"src",
+			"main",
+			"jniLibs",
+			abi
+		)
 
 		if not os.path.exists(inst_path):
 			os.makedirs(inst_path)
 
-		run_cmake(sdl_bin_path, ["libSDL2.so"], inst_path)
-		run_cmake(hlsdk_bin_path, None, inst_path)
-		run_cmake(mainui_bin_path, None, inst_path)
+		run_cmake(
+			sdl_bin_path,
+			["libSDL2.so"],
+			inst_path
+		)
 
-	process = subprocess.Popen(waf_exec, env=env)
-	process.communicate()
+		run_cmake(
+			hlsdk_bin_path,
+			None,
+			inst_path
+		)
+
+		run_cmake(
+			mainui_bin_path,
+			None,
+			inst_path
+		)
+
+	process = subprocess.run(
+		waf_exec,
+		env=env
+	)
+
+	if process.returncode != 0:
+		raise RuntimeError(
+			"Waf build failed with exit code {}".format(
+				process.returncode
+			)
+		)
 
 	return 0
 
+
 if __name__ == "__main__":
-	sys.exit(main())
+	try:
+		sys.exit(main())
+	except Exception as exc:
+		print(
+			"build-ninja.py: {}".format(exc),
+			file=sys.stderr
+		)
+		sys.exit(1)

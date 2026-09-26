@@ -1,0 +1,86 @@
+name: MAGD Android
+
+on:
+  push:
+    branches:
+      - master
+    paths:
+      - "engine/**"
+      - "common/**"
+      - "filesystem/**"
+      - "public/**"
+      - "3rdparty/mainui/**"
+      - "3rdparty/mbedtls/**"
+      - "3rdparty/extras/**"
+      - "android/**"
+      - "scripts/configure-ninja.py"
+      - "scripts/build-ninja.py"
+      - "scripts/gha/deps_android.sh"
+      - "scripts/gha/build_android.sh"
+      - "wscript"
+      - ".github/workflows/magd-android.yml"
+
+  pull_request:
+    paths:
+      - "engine/**"
+      - "common/**"
+      - "filesystem/**"
+      - "public/**"
+      - "3rdparty/mainui/**"
+      - "3rdparty/mbedtls/**"
+      - "3rdparty/extras/**"
+      - "android/**"
+      - "scripts/configure-ninja.py"
+      - "scripts/build-ninja.py"
+      - "scripts/gha/deps_android.sh"
+      - "scripts/gha/build_android.sh"
+      - "wscript"
+      - ".github/workflows/magd-android.yml"
+
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: magd-android-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  SDL_VERSION: 2.32.10
+  FFMPEG_VERSION: 8.1
+  YY_THUNKS_VERSION: v1.2.1
+
+jobs:
+  build:
+    name: Build Android APK
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          submodules: recursive
+
+      - name: Install Android dependencies
+        run: bash scripts/gha/deps_android.sh
+
+      - name: Build Android APK
+        run: bash scripts/gha/build_android.sh
+
+      - name: Verify APK
+        shell: bash
+        run: |
+          set -e
+
+          test -s artifacts/xash3d-fwgs-android.apk
+
+          echo "Android APK:"
+          ls -lh artifacts/xash3d-fwgs-android.apk
+
+      - name: Upload Android artifacts
+        uses: actions/upload-artifact@v7
+        with:
+          name: magd-android
+          path: artifacts/*
+          if-no-files-found: error

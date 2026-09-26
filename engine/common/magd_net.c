@@ -18,9 +18,10 @@
 
 #include "magd_net.h"
 #include "net_ws_private.h"
-#include "net_http_tls.h"
+#include "http/net_http_tls.h"
 #include "xash3d_mathlib.h"
 #include "tests.h"
+#include "filesystem.h"
 
 #include <errno.h>
 #include <stdint.h>
@@ -1571,6 +1572,197 @@ static qboolean MAGD_UrlEncode(const char *src, char *dst, size_t cap)
 	return true;
 }
 
+static void MAGD_RoomListCallback(
+	const char *url,
+	qboolean success,
+	const byte *data,
+	size_t size,
+	void *userdata
+)
+{
+	char revision_text[32];
+	int revision;
+
+	(void)url;
+	(void)userdata;
+
+	if( !success || !data || !size )
+	{
+		Cvar_DirectSet(
+			&magd_room_list_state,
+			"error"
+		);
+
+		Cvar_DirectSet(
+			&magd_room_list_error,
+			"MAGD room list request failed"
+		);
+
+		Con_Printf(
+			S_ERROR
+			"[MAGD] room list request failed\n"
+		);
+
+		return;
+	}
+
+	if( size > MAGD_ROOM_LIST_MAX_SIZE )
+	{
+		Cvar_DirectSet(
+			&magd_room_list_state,
+			"error"
+		);
+
+		Cvar_DirectSet(
+			&magd_room_list_error,
+			"MAGD room list response is too large"
+		);
+
+		Con_Printf(
+			S_ERROR
+			"[MAGD] room list response is too large: %zu bytes\n",
+			size
+		);
+
+		return;
+	}
+
+	if( data[0] != '{' )
+	{
+		Cvar_DirectSet(
+			&magd_room_list_state,
+			"error"
+		);
+
+		Cvar_DirectSet(
+			&magd_room_list_error,
+			"Invalid MAGD room list response"
+		);
+
+		Con_Printf(
+			S_ERROR
+			"[MAGD] invalid room list response\n"
+		);
+
+		return;
+	}
+
+	if( !FS_WriteFile(
+			MAGD_ROOM_LIST_FILE,
+			data,
+			(fs_offset_t)size
+		))
+	{
+		Cvar_DirectSet(
+			&magd_room_list_state,
+			"error"
+		);
+
+		Cvar_DirectSet(
+			&magd_room_list_error,
+			"Could not save MAGD room cache"
+		);
+
+		Con_Printf(
+			S_ERROR
+			"[MAGD] failed to save room cache '%s'\n",
+			MAGD_ROOM_LIST_FILE
+		);
+
+		return;
+	}
+
+	revision =
+		(int)magd_room_list_revision.value + 1;
+
+	if( revision < 1 )
+		revision = 1;
+
+	Q_snprintf(
+		revision_text,
+		sizeof( revision_text ),
+		"%d",
+		revision
+	);
+
+	Cvar_DirectSet(
+		&magd_room_list_revision,
+		revision_text
+	);
+
+	Cvar_DirectSet(
+		&magd_room_list_state,
+		"ready"
+	);
+
+	Cvar_DirectSet(
+		&magd_room_list_error,
+		""
+	);
+
+	Con_Printf(
+		"^2[MAGD]^7 Room list updated: %zu bytes\n",
+		size
+	);
+}
+
+static void MAGD_ListRooms_f( void )
+{
+	char base[1024];
+	char url[1536];
+	size_t len;
+
+	Q_strncpy(
+		base,
+		magd_server_url.string,
+		sizeof( base )
+	);
+
+	len = Q_strlen( base );
+
+	while( len > 0 && base[len - 1] == '/' )
+		base[--len] = 0;
+
+	Cvar_DirectSet(
+		&magd_room_list_state,
+		"loading"
+	);
+
+	Cvar_DirectSet(
+		&magd_room_list_error,
+		""
+	);
+
+	Q_snprintf(
+		url,
+		sizeof( url ),
+		"%s/api/v1/rooms",
+		base
+	);
+
+	if( !HTTP_GetToMemory(
+			url,
+			MAGD_RoomListCallback,
+			NULL
+		))
+	{
+		Cvar_DirectSet(
+			&magd_room_list_state,
+			"error"
+		);
+
+		Cvar_DirectSet(
+			&magd_room_list_error,
+			"Could not start MAGD room list request"
+		);
+
+		Con_Printf(
+			S_ERROR
+			"[MAGD] failed to queue room list request\n"
+		);
+	}
+}
+
 static void MAGD_CreateCallback(const char *url, qboolean success,
 	const byte *data, size_t size, void *userdata)
 {
@@ -1653,10 +1845,7 @@ static void MAGD_CreateRoom_f(void)
 	char url[4096];
 	int max_players = bound(2, (int)magd_max_players.value, 32);
 
-	// تعيين حالة الاتصال وتصفير آخر خطأ في بداية الدالة
-	Cvar_DirectSet(&magd_connection_state, "creating");
-	Cvar_DirectSet(&magd_last_error, "");
-
+	// 1. استخراج وقراءة القيم من متغيرات النظام (Cvars)
 	Q_snprintf(code, sizeof(code), "MAGD-%04X", (unsigned int)COM_RandomLong(0x1000, 0xFFFF));
 	Q_strncpy(name, magd_room_name.string, sizeof(name));
 	Q_strncpy(map, magd_room_map.string, sizeof(map));
@@ -1664,38 +1853,64 @@ static void MAGD_CreateRoom_f(void)
 	Q_strncpy(host, magd_host_name.string, sizeof(host));
 	Q_strncpy(password, magd_room_password.string, sizeof(password));
 
+	// 2. تشفير البيانات لضمان سلامة النقل عبر URL Encoding
 	if (!MAGD_UrlEncode(name, enc_name, sizeof(enc_name)) ||
 		!MAGD_UrlEncode(map, enc_map, sizeof(enc_map)) ||
 		!MAGD_UrlEncode(game, enc_game, sizeof(enc_game)) ||
 		!MAGD_UrlEncode(host, enc_host, sizeof(enc_host)) ||
 		!MAGD_UrlEncode(password, enc_password, sizeof(enc_password)))
 	{
+		Cvar_DirectSet(&magd_connection_state, "error");
+		Cvar_DirectSet(&magd_last_error, "Room fields are too long for URL encoding");
 		Con_Printf(S_ERROR "[MAGD] room fields are too long\n");
 		return;
 	}
 
-	Cvar_DirectSet(&magd_room_code, code);
-	Cvar_DirectSet(&magd_auth_token, "");
+	// 3. ضبط رمز الغرفة وتصفير رمز التوثيق وإيقاف أي نفق سابق
+	Cvar_DirectSet(
+		&magd_room_code,
+		code
+	);
+
+	Cvar_DirectSet(
+		&magd_auth_token,
+		""
+	);
+
 	MAGD_StopTunnel();
 
-	Q_snprintf(url, sizeof(url),
+	// 4. تعيين حالة الاتصال وتصفير الخطأ بعد إيقاف النفق لتجنب كتابة disconnected فوق creating
+	Cvar_DirectSet(
+		&magd_connection_state,
+		"creating"
+	);
+
+	Cvar_DirectSet(
+		&magd_last_error,
+		""
+	);
+
+	// 5. بناء رابط الطلب (URL Request)
+	Q_snprintf(
+		url,
+		sizeof(url),
 		"%s/api/v1/rooms/create?code=%s&name=%s&map=%s&game=%s&host=%s&maxPlayers=%d&password=%s",
 		magd_server_url.string, code, enc_name, enc_map, enc_game, enc_host,
-		max_players, enc_password);
+		max_players, enc_password
+	);
 
 	Con_Printf("^2[MAGD]^7 Creating room ^3%s^7...\n", code);
 
-	// التحقق من إضافة الطلب للانتظار (Queue) وتعيين الخطأ عند الفشل
+	// 6. إرسال طلب الـ HTTP للشبكة والتحقق من إضافته للانتظار
 	if (!HTTP_GetToMemory(url, MAGD_CreateCallback, NULL))
 	{
 		Cvar_DirectSet(&magd_connection_state, "error");
-		Cvar_DirectSet(&magd_last_error,
-			"Could not start MAGD room creation request");
+		Cvar_DirectSet(&magd_last_error, "Could not start MAGD room creation request");
 
-		Con_Printf(S_ERROR
-			"[MAGD] failed to queue room creation request\n");
+		Con_Printf(S_ERROR "[MAGD] failed to queue room creation request\n");
 	}
 }
+
 
 
 static void MAGD_ConnectRoom_f(void)

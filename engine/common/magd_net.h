@@ -80,6 +80,12 @@ extern convar_t magd_max_players;
 extern convar_t magd_reconnect;
 extern convar_t magd_auto_connect;
 extern convar_t magd_allow_insecure_ws;
+extern convar_t magd_auto_start_server;
+extern convar_t magd_connection_state;
+extern convar_t magd_last_error;
+extern convar_t magd_room_list_revision;
+extern convar_t magd_room_list_state;
+extern convar_t magd_room_list_error;
 
 void MAGD_Init(void);
 void MAGD_Shutdown(void);
