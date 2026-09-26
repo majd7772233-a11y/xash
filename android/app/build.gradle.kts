@@ -20,6 +20,32 @@ extensions.configure<ApplicationExtension> {
 				"ndk/$configuredNdkVersion"
 			).path
 
+	val magdKeystorePath =
+		System.getenv("MAGD_KEYSTORE_FILE")
+			?.trim()
+			?.takeIf { it.isNotEmpty() }
+
+	val magdKeystorePassword =
+		System.getenv("KEYSTORE_PASSWORD")
+			?.takeIf { it.isNotEmpty() }
+
+	val magdKeyAlias =
+		System.getenv("KEY_ALIAS")
+			?.takeIf { it.isNotEmpty() }
+
+	val magdKeyPassword =
+		System.getenv("KEY_PASSWORD")
+			?.takeIf { it.isNotEmpty() }
+
+	val magdKeystoreFile =
+		magdKeystorePath?.let { File(it) }
+
+	val magdSigningReady =
+		magdKeystoreFile?.isFile == true &&
+		magdKeystorePassword != null &&
+		magdKeyAlias != null &&
+		magdKeyPassword != null
+
 	namespace = "su.xash.engine"
 
 	ndkVersion = configuredNdkVersion
@@ -128,6 +154,16 @@ extensions.configure<ApplicationExtension> {
 			keyAlias = "androiddebugkey"
 			keyPassword = "android"
 		}
+
+		if (magdSigningReady) {
+			create("magdRelease") {
+				storeFile = magdKeystoreFile!!
+
+				storePassword = magdKeystorePassword!!
+				keyAlias = magdKeyAlias!!
+				keyPassword = magdKeyPassword!!
+			}
+		}
 	}
 
 	lint {
@@ -191,12 +227,24 @@ extensions.configure<ApplicationExtension> {
 				"ENABLE_AUTO_UPDATE",
 				"false"
 			)
+
+			if (magdSigningReady) {
+				signingConfig =
+					signingConfigs.getByName(
+						"magdRelease"
+					)
+			}
 		}
 
 		register("asan") {
 			initWith(
 				getByName("debug")
 			)
+
+			signingConfig =
+				signingConfigs.getByName(
+					"androidDebugKey"
+				)
 		}
 
 		register("continuous") {
@@ -212,10 +260,17 @@ extensions.configure<ApplicationExtension> {
 				"true"
 			)
 
-			signingConfig =
-				signingConfigs.getByName(
-					"androidDebugKey"
-				)
+			if (magdSigningReady) {
+				signingConfig =
+					signingConfigs.getByName(
+						"magdRelease"
+					)
+			} else {
+				signingConfig =
+					signingConfigs.getByName(
+						"androidDebugKey"
+					)
+			}
 		}
 	}
 }

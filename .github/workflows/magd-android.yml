@@ -65,7 +65,29 @@ jobs:
       - name: Install Android dependencies
         run: bash scripts/gha/deps_android.sh
 
+      - name: Verify release signing secrets
+        if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+        env:
+          MY_KEYSTORE_JKS: ${{ secrets.MY_KEYSTORE_JKS }}
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+        run: |
+          set -e
+
+          test -n "$MY_KEYSTORE_JKS"
+          test -n "$KEYSTORE_PASSWORD"
+          test -n "$KEY_ALIAS"
+          test -n "$KEY_PASSWORD"
+
+          echo "Android signing secrets are configured."
+
       - name: Build Android APK
+        env:
+          MY_KEYSTORE_JKS: ${{ secrets.MY_KEYSTORE_JKS }}
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
         run: bash scripts/gha/build_android.sh
 
       - name: Verify APK

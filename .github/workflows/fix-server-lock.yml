@@ -1,0 +1,64 @@
+name: Fix MAGD Server Lockfile
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: fix-server-lock
+  cancel-in-progress: false
+
+jobs:
+  fix:
+    name: Regenerate package-lock.json
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout master
+        uses: actions/checkout@v6
+        with:
+          ref: master
+          fetch-depth: 0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: xash-server/package-lock.json
+
+      - name: Regenerate lockfile
+        working-directory: xash-server
+        run: |
+          set -e
+
+          npm install --package-lock-only --ignore-scripts
+
+      - name: Verify lockfile
+        working-directory: xash-server
+        run: |
+          set -e
+
+          npm ci --no-audit --no-fund
+
+      - name: Commit updated lockfile
+        shell: bash
+        run: |
+          set -e
+
+          if git diff --quiet -- xash-server/package-lock.json; then
+            echo "package-lock.json is already synchronized."
+            exit 0
+          fi
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          git add xash-server/package-lock.json
+
+          git commit \
+            -m "Fix xash-server package lock"
+
+          git push origin HEAD:master

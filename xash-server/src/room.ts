@@ -354,13 +354,20 @@ export class MAGDRoomObject {
     this.sessions.delete(ws);
     if (!this.meta) return;
 
-    if (session.role === 'host') {
-      this.meta.hostGraceUntil = Date.now() + HOST_GRACE_MS;
-      this.meta.lastHeartbeat = Date.now();
-      await this.saveMeta();
-      await this.ctx.storage.setAlarm(this.meta.hostGraceUntil);
-      return;
-    }
+if (session.role === 'host') {
+  this.syncPlayerCount();
+
+  this.meta.hostGraceUntil = Date.now() + HOST_GRACE_MS;
+  this.meta.lastHeartbeat = Date.now();
+
+  await this.saveMeta();
+
+  await this.ctx.storage.setAlarm(
+    this.meta.hostGraceUntil
+  );
+
+  return;
+}
 
     this.syncPlayerCount();
     this.meta.lastHeartbeat = Date.now();
