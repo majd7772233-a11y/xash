@@ -1497,7 +1497,7 @@ void CMenuMAGDOnline::_Init()
 			L( "Create Room" ),
 			L( "Create an online MAGD room and host the selected map" ),
 			PC_CREATE_GAME,
-			VoidCb( UI_MAGDCreate_Menu ),
+			UI_MAGDCreate_Menu,
 			QMF_NOTIFY
 		);
 
@@ -1506,7 +1506,7 @@ void CMenuMAGDOnline::_Init()
 			L( "Browse Rooms" ),
 			L( "Browse active MAGD online rooms" ),
 			PC_REFRESH,
-			VoidCb( UI_MAGDBrowser_Menu ),
+			UI_MAGDBrowser_Menu,
 			QMF_NOTIFY
 		);
 
@@ -1515,15 +1515,15 @@ void CMenuMAGDOnline::_Init()
 			L( "Join by Code" ),
 			L( "Join a MAGD room using its room code" ),
 			PC_JOIN_GAME,
-			VoidCb( UI_MAGDJoin_Menu ),
+			UI_MAGDJoin_Menu,
 			QMF_NOTIFY
 		);
 
 	AddButton(
 		L( "Settings" ),
 		L( "Configure the MAGD multiplayer platform" ),
-		PC_OPTIONS,
-		VoidCb( UI_MAGDSettings_Menu ),
+		PC_CONFIG,
+		UI_MAGDSettings_Menu,
 		QMF_NOTIFY
 	);
 
@@ -1544,6 +1544,7 @@ void CMenuMAGDOnline::_Init()
 		QMF_NOTIFY
 	);
 }
+
 
 /* ------------------------------------------------------------------------- */
 /* Create menu init                                                          */
