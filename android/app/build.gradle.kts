@@ -1,4 +1,5 @@
 import com.android.build.api.dsl.ApplicationExtension
+import org.gradle.kotlin.dsl.configure
 import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 import java.io.File
 import java.time.LocalDateTime
@@ -103,21 +104,21 @@ extensions.configure<ApplicationExtension> {
 
 				engineRoot,
 
-				"--variant=\\${ndk.variantName}",
+				"--variant=\${ndk.variantName}",
 
-				"--abi=\\${ndk.abi}",
+				"--abi=\${ndk.abi}",
 
-				"--configuration-dir=\\${ndk.buildRoot}",
+				"--configuration-dir=\${ndk.buildRoot}",
 
-				"--ndk-version=\\${ndk.moduleNdkVersion}",
+				"--ndk-version=\${ndk.moduleNdkVersion}",
 
-				"--min-sdk-version=\\${ndk.minPlatform}",
+				"--min-sdk-version=\${ndk.minPlatform}",
 
 				"--ndk-root=$configuredNdkRoot",
 
-				"-p:Configuration=\\${ndk.variantName}",
+				"-p:Configuration=\${ndk.variantName}",
 
-				"-p:Platform=\\${ndk.abi}"
+				"-p:Platform=\${ndk.abi}"
 			)
 		}
 	}
