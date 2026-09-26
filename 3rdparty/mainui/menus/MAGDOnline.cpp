@@ -24,6 +24,10 @@ static void UI_MAGDJoin_Menu( void );
 static void UI_MAGDSettings_Menu( void );
 static void UI_MAGDJoinRoom( const char *code );
 
+/* ------------------------------------------------------------------------- */
+/* Shared helpers                                                            */
+/* ------------------------------------------------------------------------- */
+
 static void MAGD_SetFieldStatus( CMenuField &field, const char *text )
 {
 	field.SetBuffer( text ? text : "" );
@@ -85,11 +89,95 @@ static void MAGD_NormalizeRoomCode( char *code, size_t size )
 	}
 }
 
+static bool MAGD_TextSafe( const char *text )
+{
+	if( !text )
+		return false;
+
+	for( const unsigned char *p =
+		(const unsigned char *)text; *p; ++p )
+	{
+		if( *p == '\r' || *p == '\n' )
+			return false;
+	}
+
+	return true;
+}
+
+static const char *MAGD_ConnectionStateText( const char *state )
+{
+	if( !state || !state[0] )
+		return "Disconnected";
+
+	if( !strcmp( state, "disconnected" ))
+		return "Disconnected";
+
+	if( !strcmp( state, "disabled" ))
+		return "Disabled";
+
+	if( !strcmp( state, "creating" ))
+		return "Creating room";
+
+	if( !strcmp( state, "authenticating" ))
+		return "Authenticating";
+
+	if( !strcmp( state, "connecting" ))
+		return "Connecting";
+
+	if( !strcmp( state, "tls" ))
+		return "Securing connection";
+
+	if( !strcmp( state, "handshake" ))
+		return "Establishing session";
+
+	if( !strcmp( state, "connected" ))
+		return "Connected";
+
+	if( !strcmp( state, "reconnecting" ))
+		return "Reconnecting";
+
+	if( !strcmp( state, "error" ))
+		return "Connection error";
+
+	return state;
+}
+
+static bool MAGD_ConnectionBusy( const char *state )
+{
+	if( !state )
+		return false;
+
+	return
+		!strcmp( state, "creating" ) ||
+		!strcmp( state, "authenticating" ) ||
+		!strcmp( state, "connecting" ) ||
+		!strcmp( state, "tls" ) ||
+		!strcmp( state, "handshake" );
+}
+
+static bool MAGD_ConnectionActive( const char *state )
+{
+	if( !state )
+		return false;
+
+	return
+		!strcmp( state, "creating" ) ||
+		!strcmp( state, "authenticating" ) ||
+		!strcmp( state, "connecting" ) ||
+		!strcmp( state, "tls" ) ||
+		!strcmp( state, "handshake" ) ||
+		!strcmp( state, "connected" ) ||
+		!strcmp( state, "reconnecting" );
+}
+
 /* ------------------------------------------------------------------------- */
 /* Minimal JSON reader for the MAGD room cache                               */
 /* ------------------------------------------------------------------------- */
 
-static const char *MAGD_JSONValue( const char *object, const char *key )
+static const char *MAGD_JSONValue(
+	const char *object,
+	const char *key
+)
 {
 	char needle[128];
 	const char *p;
@@ -97,16 +185,24 @@ static const char *MAGD_JSONValue( const char *object, const char *key )
 	if( !object || !key )
 		return NULL;
 
-	snprintf( needle, sizeof( needle ), "\"%s\"", key );
+	snprintf(
+		needle,
+		sizeof( needle ),
+		"\"%s\"",
+		key
+	);
 
 	p = object;
 
 	while( ( p = strstr( p, needle )) != NULL )
 	{
-		const char *q = p + strlen( needle );
+		const char *q =
+			p + strlen( needle );
 
-		while( *q == ' ' || *q == '\t' ||
-			*q == '\r' || *q == '\n' )
+		while( *q == ' ' ||
+			*q == '\t' ||
+			*q == '\r' ||
+			*q == '\n' )
 		{
 			++q;
 		}
@@ -119,8 +215,10 @@ static const char *MAGD_JSONValue( const char *object, const char *key )
 
 		++q;
 
-		while( *q == ' ' || *q == '\t' ||
-			*q == '\r' || *q == '\n' )
+		while( *q == ' ' ||
+			*q == '\t' ||
+			*q == '\r' ||
+			*q == '\n' )
 		{
 			++q;
 		}
@@ -199,7 +297,8 @@ static int MAGD_JSONInt(
 	int fallback
 )
 {
-	const char *p = MAGD_JSONValue( object, key );
+	const char *p =
+		MAGD_JSONValue( object, key );
 
 	if( !p )
 		return fallback;
@@ -213,7 +312,8 @@ static bool MAGD_JSONBool(
 	bool fallback
 )
 {
-	const char *p = MAGD_JSONValue( object, key );
+	const char *p =
+		MAGD_JSONValue( object, key );
 
 	if( !p )
 		return fallback;
@@ -227,7 +327,9 @@ static bool MAGD_JSONBool(
 	return fallback;
 }
 
-static const char *MAGD_FindObjectEnd( const char *start )
+static const char *MAGD_FindObjectEnd(
+	const char *start
+)
 {
 	int depth = 0;
 	bool inString = false;
@@ -308,7 +410,9 @@ class CMenuMAGDBrowser;
 class CMenuMAGDRoomModel : public CMenuBaseModel
 {
 public:
-	explicit CMenuMAGDRoomModel( CMenuMAGDBrowser *owner ) :
+	explicit CMenuMAGDRoomModel(
+		CMenuMAGDBrowser *owner
+	) :
 		parent( owner )
 	{
 		;
@@ -321,7 +425,10 @@ public:
 
 		rooms.RemoveAll();
 
-		data = EngFuncs::COM_LoadFile( MAGD_ROOM_CACHE, &length );
+		data = EngFuncs::COM_LoadFile(
+			MAGD_ROOM_CACHE,
+			&length
+		);
 
 		if( !data || length <= 0 )
 		{
@@ -343,7 +450,10 @@ public:
 			return;
 		}
 
-		roomsArray = strchr( roomsArray, '[' );
+		roomsArray = strchr(
+			roomsArray,
+			'['
+		);
 
 		if( !roomsArray )
 		{
@@ -351,7 +461,8 @@ public:
 			return;
 		}
 
-		const char *p = roomsArray + 1;
+		const char *p =
+			roomsArray + 1;
 
 		while( *p && *p != ']' )
 		{
@@ -374,62 +485,75 @@ public:
 				break;
 
 			magd_room_t room;
-			memset( &room, 0, sizeof( room ));
+			memset(
+				&room,
+				0,
+				sizeof( room )
+			);
 
 			if( MAGD_JSONString(
 					p,
 					"code",
 					room.code,
 					sizeof( room.code )) &&
-				MAGD_ValidRoomCode( room.code ))
+				MAGD_ValidRoomCode(
+					room.code ))
 			{
 				MAGD_JSONString(
 					p,
 					"name",
 					room.name,
-					sizeof( room.name ));
+					sizeof( room.name )
+				);
 
 				MAGD_JSONString(
 					p,
 					"map",
 					room.map,
-					sizeof( room.map ));
+					sizeof( room.map )
+				);
 
 				MAGD_JSONString(
 					p,
 					"game",
 					room.game,
-					sizeof( room.game ));
+					sizeof( room.game )
+				);
 
 				MAGD_JSONString(
 					p,
 					"hostName",
 					room.hostName,
-					sizeof( room.hostName ));
+					sizeof( room.hostName )
+				);
 
 				room.playerCount =
 					MAGD_JSONInt(
 						p,
 						"players",
-						0 );
+						0
+					);
 
 				room.maxPlayers =
 					MAGD_JSONInt(
 						p,
 						"maxPlayers",
-						0 );
+						0
+					);
 
 				room.hasPassword =
 					MAGD_JSONBool(
 						p,
 						"hasPassword",
-						false );
+						false
+					);
 
 				room.hostConnected =
 					MAGD_JSONBool(
 						p,
 						"hostConnected",
-						false );
+						false
+					);
 
 				snprintf(
 					room.players,
@@ -532,7 +656,9 @@ public:
 		return QM_LEFT;
 	}
 
-	void OnActivateEntry( int line ) override;
+	void OnActivateEntry(
+		int line
+	) override;
 
 	bool Sort(
 		int column,
@@ -545,9 +671,33 @@ public:
 		return false;
 	}
 
-	magd_room_t &GetRoom( int index )
+	magd_room_t &GetRoom(
+		int index
+	)
 	{
 		return rooms[index];
+	}
+
+	bool IsJoinable(
+		int index
+	) const
+	{
+		if( !rooms.IsValidIndex( index ))
+			return false;
+
+		const magd_room_t &room =
+			rooms[index];
+
+		if( !room.hostConnected )
+			return false;
+
+		if( room.maxPlayers > 0 &&
+			room.playerCount >= room.maxPlayers )
+		{
+			return false;
+		}
+
+		return true;
 	}
 
 	CMenuMAGDBrowser *parent;
@@ -562,7 +712,11 @@ class CMenuMAGDOnline : public CMenuFramework
 {
 public:
 	CMenuMAGDOnline() :
-		CMenuFramework( "CMenuMAGDOnline" )
+		CMenuFramework( "CMenuMAGDOnline" ),
+		createRoom( NULL ),
+		browseRooms( NULL ),
+		joinRoom( NULL ),
+		disconnect( NULL )
 	{
 		;
 	}
@@ -584,15 +738,23 @@ private:
 	{
 		const char *state =
 			EngFuncs::GetCvarString(
-				"magd_connection_state" );
+				"magd_connection_state"
+			);
 
 		const char *room =
 			EngFuncs::GetCvarString(
-				"magd_room_code" );
+				"magd_room_code"
+			);
 
 		const char *error =
 			EngFuncs::GetCvarString(
-				"magd_last_error" );
+				"magd_last_error"
+			);
+
+		const char *stateText =
+			MAGD_ConnectionStateText(
+				state
+			);
 
 		char text[256];
 
@@ -602,7 +764,7 @@ private:
 				text,
 				sizeof( text ),
 				"%s - %s",
-				state ? state : "disconnected",
+				stateText,
 				error
 			);
 		}
@@ -612,7 +774,7 @@ private:
 				text,
 				sizeof( text ),
 				"%s - %s",
-				state ? state : "disconnected",
+				stateText,
 				room
 			);
 		}
@@ -622,7 +784,7 @@ private:
 				text,
 				sizeof( text ),
 				"%s",
-				state ? state : "disconnected"
+				stateText
 			);
 		}
 
@@ -631,17 +793,31 @@ private:
 			text
 		);
 
-		bool connected =
-			state &&
-			strcmp(
-				state,
-				"disconnected" ) != 0 &&
-			strcmp(
-				state,
-				"disabled" ) != 0;
+		bool active =
+			MAGD_ConnectionActive( state );
+
+		bool busy =
+			MAGD_ConnectionBusy( state );
 
 		disconnect->SetGrayed(
-			!connected
+			!active
+		);
+
+		createRoom->SetGrayed(
+			busy ||
+			!EngFuncs::GetCvarFloat(
+				"magd_enabled" )
+		);
+
+		joinRoom->SetGrayed(
+			busy ||
+			!EngFuncs::GetCvarFloat(
+				"magd_enabled" )
+		);
+
+		browseRooms->SetGrayed(
+			!EngFuncs::GetCvarFloat(
+				"magd_enabled" )
 		);
 	}
 
@@ -656,6 +832,10 @@ private:
 	void _Init() override;
 
 	CMenuField status;
+
+	CMenuPicButton *createRoom;
+	CMenuPicButton *browseRooms;
+	CMenuPicButton *joinRoom;
 	CMenuPicButton *disconnect;
 };
 
@@ -675,14 +855,15 @@ public:
 	void Create()
 	{
 		int players =
-			atoi( maxPlayers.GetBuffer() );
+			atoi(
+				maxPlayers.GetBuffer()
+			);
 
 		if( !serverName.GetBuffer()[0] )
 		{
 			UI_ShowMessageBox(
 				L( "Please enter a server name." )
 			);
-
 			return;
 		}
 
@@ -691,7 +872,6 @@ public:
 			UI_ShowMessageBox(
 				L( "Please enter a host name." )
 			);
-
 			return;
 		}
 
@@ -700,7 +880,6 @@ public:
 			UI_ShowMessageBox(
 				L( "Please enter a map name." )
 			);
-
 			return;
 		}
 
@@ -709,7 +888,23 @@ public:
 			UI_ShowMessageBox(
 				L( "Please enter a game/mod name." )
 			);
+			return;
+		}
 
+		if( !MAGD_TextSafe(
+				serverName.GetBuffer() ) ||
+			!MAGD_TextSafe(
+				hostName.GetBuffer() ) ||
+			!MAGD_TextSafe(
+				map.GetBuffer() ) ||
+			!MAGD_TextSafe(
+				game.GetBuffer() ) ||
+			!MAGD_TextSafe(
+				password.GetBuffer() ))
+		{
+			UI_ShowMessageBox(
+				L( "Text fields cannot contain new lines." )
+			);
 			return;
 		}
 
@@ -718,7 +913,6 @@ public:
 			UI_ShowMessageBox(
 				L( "Maximum players must be between 2 and 32." )
 			);
-
 			return;
 		}
 
@@ -728,7 +922,6 @@ public:
 			UI_ShowMessageBox(
 				L( "The selected map is not available in this game." )
 			);
-
 			return;
 		}
 
@@ -801,12 +994,23 @@ public:
 			sizeof( code )
 		);
 
-		if( !MAGD_ValidRoomCode( code ))
+		if( !MAGD_ValidRoomCode(
+				code ))
 		{
 			UI_ShowMessageBox(
 				L( "Please enter a valid MAGD room code." )
 			);
+			return;
+		}
 
+		if( !MAGD_TextSafe(
+				code ) ||
+			!MAGD_TextSafe(
+				password.GetBuffer() ))
+		{
+			UI_ShowMessageBox(
+				L( "Text fields cannot contain new lines." )
+			);
 			return;
 		}
 
@@ -825,10 +1029,30 @@ public:
 
 	void SetRoomCode( const char *code )
 	{
+		char normalized[128];
+
 		if( !code )
 			return;
 
-		roomCode.SetBuffer( code );
+		Q_strncpy(
+			normalized,
+			code,
+			sizeof( normalized )
+		);
+
+		MAGD_NormalizeRoomCode(
+			normalized,
+			sizeof( normalized )
+		);
+
+		roomCode.SetBuffer(
+			normalized
+		);
+
+		/*
+		 * Never carry an old room password into a newly
+		 * selected room from the browser.
+		 */
 		password.SetBuffer( "" );
 	}
 
@@ -837,9 +1061,16 @@ public:
 		CMenuFramework::Show();
 
 		if( !roomCode.GetBuffer()[0] )
+		{
 			roomCode.UpdateCvar( true );
+		}
 
-		password.UpdateCvar( true );
+		/*
+		 * The password field is intentionally cleared whenever
+		 * the Join screen is opened. The user can enter it again,
+		 * while stale credentials are never shown accidentally.
+		 */
+		password.SetBuffer( "" );
 
 		UpdateStatus();
 	}
@@ -855,11 +1086,13 @@ private:
 	{
 		const char *state =
 			EngFuncs::GetCvarString(
-				"magd_connection_state" );
+				"magd_connection_state"
+			);
 
 		const char *error =
 			EngFuncs::GetCvarString(
-				"magd_last_error" );
+				"magd_last_error"
+			);
 
 		char text[256];
 
@@ -869,7 +1102,9 @@ private:
 				text,
 				sizeof( text ),
 				"%s - %s",
-				state ? state : "disconnected",
+				MAGD_ConnectionStateText(
+					state
+				),
 				error
 			);
 		}
@@ -879,7 +1114,9 @@ private:
 				text,
 				sizeof( text ),
 				"%s",
-				state ? state : "disconnected"
+				MAGD_ConnectionStateText(
+					state
+				)
 			);
 		}
 
@@ -914,6 +1151,36 @@ public:
 
 	void SaveAndHide()
 	{
+		int players =
+			atoi(
+				maxPlayers.GetBuffer()
+			);
+
+		if( !serverUrl.GetBuffer()[0] )
+		{
+			UI_ShowMessageBox(
+				L( "Please enter the MAGD server URL." )
+			);
+			return;
+		}
+
+		if( !MAGD_TextSafe(
+				serverUrl.GetBuffer() ))
+		{
+			UI_ShowMessageBox(
+				L( "The server URL cannot contain new lines." )
+			);
+			return;
+		}
+
+		if( players < 2 || players > 32 )
+		{
+			UI_ShowMessageBox(
+				L( "Default max players must be between 2 and 32." )
+			);
+			return;
+		}
+
 		serverUrl.WriteCvar();
 		maxPlayers.WriteCvar();
 		reconnect.WriteCvar();
@@ -972,6 +1239,12 @@ public:
 
 	void RefreshRooms()
 	{
+		if( !EngFuncs::GetCvarFloat(
+				"magd_enabled" ))
+		{
+			return;
+		}
+
 		EngFuncs::ClientCmd(
 			false,
 			"magd_list_rooms\n"
@@ -985,12 +1258,21 @@ public:
 
 	void JoinRow( int index )
 	{
-		if( !model.rooms.IsValidIndex( index ))
+		if( !model.rooms.IsValidIndex(
+				index ))
 		{
 			UI_ShowMessageBox(
 				L( "Please select a MAGD room first." )
 			);
+			return;
+		}
 
+		if( !model.IsJoinable(
+				index ))
+		{
+			UI_ShowMessageBox(
+				L( "This MAGD room is offline or full." )
+			);
 			return;
 		}
 
@@ -1018,7 +1300,16 @@ public:
 			);
 
 		SyncSelection();
-		RefreshRooms();
+
+		if( EngFuncs::GetCvarFloat(
+				"magd_enabled" ))
+		{
+			RefreshRooms();
+		}
+		else
+		{
+			refresh->SetGrayed( true );
+		}
 	}
 
 	void Draw() override
@@ -1040,7 +1331,12 @@ private:
 		if( revision == lastRevision )
 		{
 			if( uiStatic.realTime >= refreshUntil )
-				refresh->SetGrayed( false );
+			{
+				refresh->SetGrayed(
+					!EngFuncs::GetCvarFloat(
+						"magd_enabled" )
+				);
+			}
 
 			return;
 		}
@@ -1049,35 +1345,58 @@ private:
 
 		model.Update();
 
-		refresh->SetGrayed( false );
+		refresh->SetGrayed(
+			!EngFuncs::GetCvarFloat(
+				"magd_enabled" )
+		);
 
 		SyncSelection();
 	}
 
 	void SyncSelection()
 	{
-		bool valid =
-			model.GetRows() > 0 &&
-			gameList.GetCurrentIndex() >= 0 &&
-			gameList.GetCurrentIndex() <
-				model.GetRows();
+		int rows =
+			model.GetRows();
 
-		join->SetGrayed( !valid );
+		int selected =
+			gameList.GetCurrentIndex();
+
+		if( rows <= 0 )
+		{
+			join->SetGrayed( true );
+			return;
+		}
+
+		if( selected < 0 ||
+			selected >= rows )
+		{
+			gameList.SetCurrentIndex( 0 );
+			selected = 0;
+		}
+
+		join->SetGrayed(
+			!model.IsJoinable(
+				selected
+			)
+		);
 	}
 
 	void SyncStatus()
 	{
 		const char *state =
 			EngFuncs::GetCvarString(
-				"magd_room_list_state" );
+				"magd_room_list_state"
+			);
 
 		const char *error =
 			EngFuncs::GetCvarString(
-				"magd_room_list_error" );
+				"magd_room_list_error"
+			);
 
 		const char *connection =
 			EngFuncs::GetCvarString(
-				"magd_connection_state" );
+				"magd_connection_state"
+			);
 
 		char text[256];
 
@@ -1087,10 +1406,10 @@ private:
 			snprintf(
 				text,
 				sizeof( text ),
-				"Refreshing rooms... Connection: %s",
-				connection ?
-					connection :
-					"disconnected"
+				"Updating rooms - Connection: %s",
+				MAGD_ConnectionStateText(
+					connection
+				)
 			);
 		}
 		else if( state &&
@@ -1102,7 +1421,7 @@ private:
 				"Room refresh failed: %s",
 				error && error[0] ?
 					error :
-					"unknown error"
+					"Unknown error"
 			);
 		}
 		else
@@ -1110,11 +1429,14 @@ private:
 			snprintf(
 				text,
 				sizeof( text ),
-				"%d rooms - Connection: %s",
+				"%d room%s - Connection: %s",
 				model.GetRows(),
-				connection ?
-					connection :
-					"disconnected"
+				model.GetRows() == 1 ?
+					"" :
+					"s",
+				MAGD_ConnectionStateText(
+					connection
+				)
 			);
 		}
 
@@ -1148,7 +1470,7 @@ private:
 };
 
 /* ------------------------------------------------------------------------- */
-/* MAGD root menu init                                                       */
+/* Main MAGD menu init                                                       */
 /* ------------------------------------------------------------------------- */
 
 void CMenuMAGDOnline::_Init()
@@ -1170,29 +1492,32 @@ void CMenuMAGDOnline::_Init()
 	AddItem( banner );
 	AddItem( status );
 
-	AddButton(
-		L( "Create Room" ),
-		L( "Create an online MAGD room and host the selected map" ),
-		PC_CREATE_GAME,
-		VoidCb( UI_MAGDCreate_Menu ),
-		QMF_NOTIFY
-	);
+	createRoom =
+		AddButton(
+			L( "Create Room" ),
+			L( "Create an online MAGD room and host the selected map" ),
+			PC_CREATE_GAME,
+			VoidCb( UI_MAGDCreate_Menu ),
+			QMF_NOTIFY
+		);
 
-	AddButton(
-		L( "Browse Rooms" ),
-		L( "Browse active MAGD online rooms" ),
-		PC_REFRESH,
-		VoidCb( UI_MAGDBrowser_Menu ),
-		QMF_NOTIFY
-	);
+	browseRooms =
+		AddButton(
+			L( "Browse Rooms" ),
+			L( "Browse active MAGD online rooms" ),
+			PC_REFRESH,
+			VoidCb( UI_MAGDBrowser_Menu ),
+			QMF_NOTIFY
+		);
 
-	AddButton(
-		L( "Join by Code" ),
-		L( "Join a MAGD room using its room code" ),
-		PC_JOIN_GAME,
-		VoidCb( UI_MAGDJoin_Menu ),
-		QMF_NOTIFY
-	);
+	joinRoom =
+		AddButton(
+			L( "Join by Code" ),
+			L( "Join a MAGD room using its room code" ),
+			PC_JOIN_GAME,
+			VoidCb( UI_MAGDJoin_Menu ),
+			QMF_NOTIFY
+		);
 
 	AddButton(
 		L( "Settings" ),
@@ -1202,13 +1527,14 @@ void CMenuMAGDOnline::_Init()
 		QMF_NOTIFY
 	);
 
-	disconnect = AddButton(
-		L( "Disconnect" ),
-		L( "Disconnect the current MAGD tunnel" ),
-		PC_DISCONNECT,
-		VoidCb( &CMenuMAGDOnline::Disconnect ),
-		QMF_NOTIFY
-	);
+	disconnect =
+		AddButton(
+			L( "Disconnect" ),
+			L( "Disconnect the current MAGD tunnel" ),
+			PC_DISCONNECT,
+			VoidCb( &CMenuMAGDOnline::Disconnect ),
+			QMF_NOTIFY
+		);
 
 	AddButton(
 		L( "Done" ),
@@ -1220,7 +1546,7 @@ void CMenuMAGDOnline::_Init()
 }
 
 /* ------------------------------------------------------------------------- */
-/* MAGD create menu init                                                     */
+/* Create menu init                                                          */
 /* ------------------------------------------------------------------------- */
 
 void CMenuMAGDCreate::_Init()
@@ -1364,7 +1690,7 @@ void CMenuMAGDCreate::_VidInit()
 }
 
 /* ------------------------------------------------------------------------- */
-/* MAGD join menu init                                                       */
+/* Join menu init                                                            */
 /* ------------------------------------------------------------------------- */
 
 void CMenuMAGDJoin::_Init()
@@ -1456,7 +1782,7 @@ void CMenuMAGDJoin::_VidInit()
 }
 
 /* ------------------------------------------------------------------------- */
-/* MAGD settings menu init                                                   */
+/* Settings init                                                             */
 /* ------------------------------------------------------------------------- */
 
 void CMenuMAGDSettings::_Init()
@@ -1467,18 +1793,29 @@ void CMenuMAGDSettings::_Init()
 
 	AddItem( banner );
 
-	serverUrl.szName = L( "MAGD Server URL" );
+	serverUrl.szName =
+		L( "MAGD Server URL" );
+
 	serverUrl.iMaxLength = 255;
 	serverUrl.bAllowColorstrings = false;
 
-	maxPlayers.szName = L( "Default Max Players" );
+	maxPlayers.szName =
+		L( "Default Max Players" );
+
 	maxPlayers.iMaxLength = 2;
 	maxPlayers.bNumbersOnly = true;
 
-	reconnect.szName = L( "Automatic Reconnect" );
-	autoConnect.szName = L( "Auto Connect to Host" );
-	autoStart.szName = L( "Auto Start Local Server" );
-	insecureWs.szName = L( "Allow insecure ws:// (debug)" );
+	reconnect.szName =
+		L( "Automatic Reconnect" );
+
+	autoConnect.szName =
+		L( "Auto Connect to Host" );
+
+	autoStart.szName =
+		L( "Auto Start Local Server" );
+
+	insecureWs.szName =
+		L( "Allow insecure ws:// (debug)" );
 
 	serverUrl.LinkCvar(
 		"magd_server_url"
@@ -1574,7 +1911,7 @@ void CMenuMAGDSettings::_VidInit()
 }
 
 /* ------------------------------------------------------------------------- */
-/* MAGD browser init                                                         */
+/* Browser init                                                              */
 /* ------------------------------------------------------------------------- */
 
 void CMenuMAGDBrowser::_Init()
@@ -1647,29 +1984,32 @@ void CMenuMAGDBrowser::_Init()
 	AddItem( gameList );
 	AddItem( status );
 
-	join = AddButton(
-		L( "Join Selected" ),
-		L( "Join the selected MAGD room" ),
-		PC_JOIN_GAME,
-		VoidCb( &CMenuMAGDBrowser::JoinSelected ),
-		QMF_NOTIFY
-	);
+	join =
+		AddButton(
+			L( "Join Selected" ),
+			L( "Join the selected MAGD room" ),
+			PC_JOIN_GAME,
+			VoidCb( &CMenuMAGDBrowser::JoinSelected ),
+			QMF_NOTIFY
+		);
 
-	refresh = AddButton(
-		L( "Refresh" ),
-		L( "Refresh the MAGD room list" ),
-		PC_REFRESH,
-		VoidCb( &CMenuMAGDBrowser::RefreshRooms ),
-		QMF_NOTIFY
-	);
+	refresh =
+		AddButton(
+			L( "Refresh" ),
+			L( "Refresh the MAGD room list" ),
+			PC_REFRESH,
+			VoidCb( &CMenuMAGDBrowser::RefreshRooms ),
+			QMF_NOTIFY
+		);
 
-	joinByCode = AddButton(
-		L( "Join by Code" ),
-		L( "Enter a MAGD room code manually" ),
-		PC_CREATE_GAME,
-		VoidCb( UI_MAGDJoin_Menu ),
-		QMF_NOTIFY
-	);
+	joinByCode =
+		AddButton(
+			L( "Join by Code" ),
+			L( "Enter a MAGD room code manually" ),
+			PC_CREATE_GAME,
+			VoidCb( UI_MAGDJoin_Menu ),
+			QMF_NOTIFY
+		);
 
 	AddButton(
 		L( "Done" ),
@@ -1684,41 +2024,46 @@ void CMenuMAGDBrowser::_Init()
 
 void CMenuMAGDBrowser::_VidInit()
 {
+	/*
+	 * Keep the table clear of the bottom status and buttons.
+	 */
 	gameList.SetRect(
 		360,
 		230,
 		-20,
-		465
+		400
 	);
 
 	status.SetRect(
 		300,
-		705,
+		645,
 		-20,
-		40
-	);
-
-	joinByCode->SetCoord(
-		710,
-		705
-	);
-
-	refresh->SetCoord(
-		560,
-		705
+		36
 	);
 
 	join->SetCoord(
 		410,
-		705
+		695
+	);
+
+	refresh->SetCoord(
+		560,
+		695
+	);
+
+	joinByCode->SetCoord(
+		710,
+		695
 	);
 }
 
 /* ------------------------------------------------------------------------- */
-/* Room model -> browser activation                                          */
+/* Room model activation                                                     */
 /* ------------------------------------------------------------------------- */
 
-void CMenuMAGDRoomModel::OnActivateEntry( int line )
+void CMenuMAGDRoomModel::OnActivateEntry(
+	int line
+)
 {
 	if( parent )
 		parent->JoinRow( line );
@@ -1762,11 +2107,15 @@ ADD_MENU(
 /* Cross-menu helpers                                                        */
 /* ------------------------------------------------------------------------- */
 
-static void UI_MAGDJoinRoom( const char *code )
+static void UI_MAGDJoinRoom(
+	const char *code
+)
 {
 	if( !menu_magd_join )
 		return;
 
 	menu_magd_join->Show();
-	menu_magd_join->SetRoomCode( code );
+	menu_magd_join->SetRoomCode(
+		code
+	);
 }
