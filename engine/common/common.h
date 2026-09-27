@@ -689,6 +689,7 @@ void Cmd_AutoComplete( char *complete_string );
 void Cmd_AutoCompleteClear( void );
 void Host_InitializeConfig( file_t *f, const char *config, const char *description );
 void Host_FinalizeConfig( file_t *f, const char *config );
+void Com_EscapeCommand( char *newCommand, const char *oldCommand, int len );
 
 //
 // custom.c

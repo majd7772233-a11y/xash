@@ -1540,3 +1540,29 @@ void Key_EnumCmds_f( void )
 	else Con_Printf( S_ERROR "couldn't write help.txt.\n");
 	FS_AllowDirectPaths( false );
 }
+
+void Com_EscapeCommand( char *newCommand, const char *oldCommand, int len )
+{
+	char c;
+	int scripting = Cvar_VariableInteger( "cmd_scripting" );
+
+	while( (c = *oldCommand++) && len > 1 )
+	{
+		if( c == '"' )
+		{
+			*newCommand++ = '\\';
+			len--;
+		}
+
+		if( scripting && c == '$')
+		{
+			*newCommand++ = '$';
+			len--;
+		}
+
+		*newCommand++ = c;
+		len--;
+	}
+
+	*newCommand++ = 0;
+}
