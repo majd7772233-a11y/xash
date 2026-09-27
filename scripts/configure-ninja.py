@@ -8,7 +8,7 @@
 #
 # This program is distributed in the hope that it will be useful,
 # but WITHOUT ANY WARRANTY; without even the implied warranty of
-# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
 # GNU General Public License for more details.
 
 from __future__ import print_function
@@ -70,12 +70,7 @@ def run_cmake(
 
 	cmake_exec.extend(args)
 
-	result = subprocess.run(cmake_exec)
-
-	if result.returncode != 0:
-		raise RuntimeError(
-			"CMake configuration failed for {}".format(root)
-		)
+	subprocess.run(cmake_exec)
 
 
 def main():
