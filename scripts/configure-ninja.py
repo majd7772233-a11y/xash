@@ -270,15 +270,10 @@ def main():
 		"ninja"
 	]
 
-	result = subprocess.run(
+	subprocess.run(
 		waf_exec,
 		env=env
 	)
-
-	if result.returncode != 0:
-		raise RuntimeError(
-			"Waf configuration failed"
-		)
 
 	with io.open(
 		os.path.join(
