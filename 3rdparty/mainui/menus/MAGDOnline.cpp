@@ -2008,7 +2008,7 @@ void CMenuMAGDBrowser::_Init()
 			L( "Join by Code" ),
 			L( "Enter a MAGD room code manually" ),
 			PC_CREATE_GAME,
-			VoidCb( UI_MAGDJoin_Menu ),
+			UI_MAGDJoin_Menu,
 			QMF_NOTIFY
 		);
 
