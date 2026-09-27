@@ -79,8 +79,7 @@ extensions.configure<ApplicationExtension> {
 				"ninja.abiFilters"
 			] = setOf(
 				"armeabi-v7a",
-				"arm64-v8a",
-				"x86"
+				"arm64-v8a"
 			)
 
 			experimentalProperties[
