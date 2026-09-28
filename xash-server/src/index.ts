@@ -262,7 +262,27 @@ export default {
 
     try {
       if (url.pathname === '/api/v1/health' && request.method === 'GET') {
-        return json({ status: 'ok', platform: 'MAGD Online Platform', version: '2.0.0' });
+        try {
+          await secret(env);
+
+          return json({
+            status: 'ok',
+            platform: 'MAGD Online Platform',
+            version: '2.0.0',
+            secretConfigured: true,
+          });
+        } catch {
+          return json(
+            {
+              status: 'error',
+              platform: 'MAGD Online Platform',
+              version: '2.0.0',
+              secretConfigured: false,
+              error: 'MAGD_JWT_SECRET is not configured',
+            },
+            503
+          );
+        }
       }
 
       if (url.pathname === '/api/v1/auth/guest' && (request.method === 'GET' || request.method === 'POST')) {
