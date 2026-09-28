@@ -27,5 +27,11 @@
       "type": "durable-object",
       "storage": "sqlite"
     }
+  },
+
+  "secrets": {
+    "required": [
+      "MAGD_JWT_SECRET"
+    ]
   }
 }
