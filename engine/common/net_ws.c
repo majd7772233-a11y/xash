@@ -1517,72 +1517,128 @@ static int NET_SendLong( netsrc_t sock, int net_socket, const char *buf, size_t 
 NET_SendPacketEx
 ==================
 */
-void NET_SendPacketEx( netsrc_t sock, size_t length, const void *data, netadr_t to, size_t splitsize )
+void NET_SendPacketEx(
+	netsrc_t sock,
+	size_t length,
+	const void *data,
+	netadr_t to,
+	size_t splitsize
+)
 {
-	struct sockaddr_storage	addr = { 0 };
-	SOCKET		net_socket = 0;
-	netadrtype_t type = NET_NetadrType( &to );
+	struct sockaddr_storage addr = { 0 };
+	SOCKET net_socket = 0;
+	netadrtype_t type = NET_NetadrType(&to);
 
-	if( !net.initialized || type == NA_LOOPBACK )
+	if (!net.initialized || type == NA_LOOPBACK)
 	{
-		NET_SendLoopPacket( sock, length, data, to );
+		NET_SendLoopPacket(sock, length, data, to);
 		return;
 	}
 
-	if( MAGD_GetMode() == MAGD_NET_MODE_TUNNEL )
+	/*
+	 * While MAGD tunnel mode is active, all outgoing game
+	 * datagrams belong to the tunnel. Never fall through to
+	 * normal UDP when the MAGD queue is full.
+	 */
+	if (MAGD_GetMode() == MAGD_NET_MODE_TUNNEL)
 	{
-		if( MAGD_SendDatagram( data, length, &to ))
-			return;
+		if (!MAGD_SendDatagram(data, length, &to))
+		{
+			Con_DPrintf(
+				S_ERROR
+				"[MAGD] outgoing tunnel queue full; "
+				"dropping packet to %s\n",
+				NET_AdrToString(to)
+			);
+		}
+
+		return;
 	}
-	else if( type == NA_BROADCAST || type == NA_IP )
+
+	if (type == NA_BROADCAST || type == NA_IP)
 	{
 		net_socket = net.ip_sockets[sock];
-		if( !NET_IsSocketValid( net_socket ))
+
+		if (!NET_IsSocketValid(net_socket))
 			return;
 	}
-	else if( type == NA_MULTICAST_IP6 || type == NA_IP6 )
+	else if (type == NA_MULTICAST_IP6 || type == NA_IP6)
 	{
 		net_socket = net.ip6_sockets[sock];
-		if( !NET_IsSocketValid( net_socket ))
+
+		if (!NET_IsSocketValid(net_socket))
 			return;
 	}
 	else
 	{
-		Host_Error( "%s: bad address type %i (%i, %i)\n", __func__, to.type, to.ip6_0[0], to.ip6_0[1] );
+		Host_Error(
+			"%s: bad address type %i (%i, %i)\n",
+			__func__,
+			to.type,
+			to.ip6_0[0],
+			to.ip6_0[1]
+		);
+
+		return;
 	}
 
-	NET_NetadrToSockadr( &to, &addr );
+	NET_NetadrToSockadr(&to, &addr);
 
-	int ret = NET_SendLong( sock, net_socket, data, length, 0, &addr, NET_SockAddrLen( &addr ), splitsize );
+	int ret = NET_SendLong(
+		sock,
+		net_socket,
+		data,
+		length,
+		0,
+		&addr,
+		NET_SockAddrLen(&addr),
+		splitsize
+	);
 
-	if( NET_IsSocketError( ret ))
+	if (NET_IsSocketError(ret))
 	{
 		int err = WSAGetLastError();
 
-		// WSAEWOULDBLOCK is silent
-		if( err == WSAEWOULDBLOCK )
+		/* WSAEWOULDBLOCK is silent */
+		if (err == WSAEWOULDBLOCK)
 			return;
 
-		// some PPP links don't allow broadcasts
-		if( err == WSAEADDRNOTAVAIL && ( type == NA_BROADCAST || type == NA_MULTICAST_IP6 ))
-			return;
-
-		if( Host_IsDedicated( ))
+		/* some PPP links don't allow broadcasts */
+		if (err == WSAEADDRNOTAVAIL &&
+			(type == NA_BROADCAST || type == NA_MULTICAST_IP6))
 		{
-			Con_DPrintf( S_ERROR "%s: %s to %s\n", __func__, NET_ErrorString(), NET_AdrToString( to ));
+			return;
 		}
-		else if( err == WSAEADDRNOTAVAIL || err == WSAENOBUFS )
+
+		if (Host_IsDedicated())
 		{
-			Con_DPrintf( S_ERROR "%s: %s to %s\n", __func__, NET_ErrorString(), NET_AdrToString( to ));
+			Con_DPrintf(
+				S_ERROR "%s: %s to %s\n",
+				__func__,
+				NET_ErrorString(),
+				NET_AdrToString(to)
+			);
+		}
+		else if (err == WSAEADDRNOTAVAIL || err == WSAENOBUFS)
+		{
+			Con_DPrintf(
+				S_ERROR "%s: %s to %s\n",
+				__func__,
+				NET_ErrorString(),
+				NET_AdrToString(to)
+			);
 		}
 		else
 		{
-			Con_Printf( S_ERROR "%s: %s to %s\n", __func__, NET_ErrorString(), NET_AdrToString( to ));
+			Con_Printf(
+				S_ERROR "%s: %s to %s\n",
+				__func__,
+				NET_ErrorString(),
+				NET_AdrToString(to)
+			);
 		}
 	}
-
 }
-
 /*
 ==================
 NET_SendPacket
