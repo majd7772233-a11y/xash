@@ -69,6 +69,65 @@ export function parseHeader(
     return null;
   }
 
+  /*
+   * Every MAGD message must fit inside the protocol's
+   * maximum message size before any type-specific parsing.
+   */
+  if (buffer.byteLength > MAGD_MAX_MESSAGE_SIZE) {
+    return null;
+  }
+
+  const view = new DataView(buffer);
+
+  const magic = view.getUint16(0, false);
+  const type = view.getUint8(2) as MagdMessageTypeValue;
+  const length = view.getUint16(3, false);
+
+  if (
+    magic !== MAGD_MAGIC ||
+    buffer.byteLength !== MAGD_HEADER_SIZE + length
+  ) {
+    return null;
+  }
+
+  /*
+   * Reject protocol types that this MAGD implementation
+   * does not know about instead of silently accepting them.
+   */
+  switch (type) {
+    case MagdMessageType.HELLO:
+    case MagdMessageType.WELCOME:
+    case MagdMessageType.PING:
+    case MagdMessageType.PONG:
+    case MagdMessageType.HOST_REGISTER:
+    case MagdMessageType.HOST_UPDATE:
+    case MagdMessageType.JOIN_ROOM:
+    case MagdMessageType.READY:
+    case MagdMessageType.GAME_DATAGRAM:
+    case MagdMessageType.ERROR:
+      break;
+
+    default:
+      return null;
+  }
+
+  if (
+    type === MagdMessageType.GAME_DATAGRAM &&
+    (
+      length < MAGD_GAME_ENVELOPE_SIZE ||
+      length > MAGD_GAME_ENVELOPE_SIZE + MAGD_MAX_PACKET_SIZE
+    )
+  ) {
+    return null;
+  }
+
+  return {
+    magic,
+    type,
+    length,
+  };
+}
+
   const view = new DataView(buffer);
 
   const magic = view.getUint16(0, false);

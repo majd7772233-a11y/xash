@@ -104,6 +104,22 @@ export class MAGDRoomObject {
     else await this.ctx.storage.delete(ROOM_META_KEY);
   }
 
+private sendProtocolError(
+  ws: WebSocket,
+  message: string,
+): void {
+  try {
+    ws.send(
+      createMessage(
+        MagdMessageType.ERROR,
+        new TextEncoder().encode(message.slice(0, 256)),
+      ),
+    );
+  } catch {
+    /* Ignore failures while reporting a protocol error. */
+  }
+}
+
   private safeMeta(): Omit<RoomMeta, 'passwordHash' | 'hostSubject' | 'hostGraceUntil'> & { hostConnected: boolean } | null {
     if (!this.meta) return null;
     const {
@@ -329,10 +345,125 @@ export class MAGDRoomObject {
     return new Response('Not found', { status: 404 });
   }
 
-  async webSocketMessage(ws: WebSocket, message: ArrayBuffer | string): Promise<void> {
-    if (typeof message === 'string') return;
-    if (message.byteLength > MAX_PACKET_SIZE + 7) return;
+async webSocketMessage(
+  ws: WebSocket,
+  message: ArrayBuffer | string,
+): Promise<void> {
+  const session = this.sessions.get(ws);
 
+  if (!session || !this.meta) {
+    try {
+      ws.close(1008, 'Invalid MAGD session');
+    } catch {}
+
+    return;
+  }
+
+  /*
+   * MAGD currently uses binary WebSocket frames only.
+   * Text frames are not part of the transport protocol.
+   */
+  if (typeof message === 'string') {
+    this.sendProtocolError(
+      ws,
+      'MAGD protocol requires binary WebSocket frames',
+    );
+    return;
+  }
+
+  /*
+   * Keep the WebSocket message bounded to the same maximum
+   * used by the MAGD binary protocol.
+   */
+  if (message.byteLength > MAGD_MAX_MESSAGE_SIZE) {
+    this.sendProtocolError(
+      ws,
+      'MAGD message is too large',
+    );
+    return;
+  }
+
+  const header = parseHeader(message);
+
+  if (!header) {
+    this.sendProtocolError(
+      ws,
+      'Invalid MAGD protocol message',
+    );
+    return;
+  }
+
+  switch (header.type) {
+    case MagdMessageType.PING: {
+      try {
+        const payload = new Uint8Array(
+          message,
+          MAGD_HEADER_SIZE,
+          header.length,
+        ).slice();
+
+        ws.send(
+          createMessage(
+            MagdMessageType.PONG,
+            payload,
+          ),
+        );
+      } catch {
+        this.sendProtocolError(
+          ws,
+          'Failed to send MAGD PONG',
+        );
+      }
+
+      return;
+    }
+
+    case MagdMessageType.PONG:
+      /*
+       * PONG is accepted for protocol compatibility.
+       * The current server does not need to answer it.
+       */
+      return;
+
+    case MagdMessageType.READY:
+      /*
+       * READY is currently informational only.
+       * The room state is established when the WebSocket
+       * session is accepted.
+       */
+      return;
+
+    case MagdMessageType.GAME_DATAGRAM:
+      await this.relayGameDatagram(
+        ws,
+        message,
+      );
+      return;
+
+    case MagdMessageType.HELLO:
+    case MagdMessageType.HOST_REGISTER:
+    case MagdMessageType.HOST_UPDATE:
+    case MagdMessageType.JOIN_ROOM:
+    case MagdMessageType.WELCOME:
+    case MagdMessageType.ERROR:
+      this.sendProtocolError(
+        ws,
+        'Unsupported MAGD message for an established room session',
+      );
+      return;
+
+    default:
+      /*
+       * parseHeader() already rejects unknown types.
+       * Keep this fallback for defensive completeness.
+       */
+      this.sendProtocolError(
+        ws,
+        'Unknown MAGD message type',
+      );
+      return;
+  }
+}
     const header = parseHeader(message);
     if (!header) return;
 
