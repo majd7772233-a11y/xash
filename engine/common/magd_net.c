@@ -934,54 +934,199 @@ static qboolean MAGD_HandshakeComplete(void)
 			char connection[128];
 			char accept[128];
 			char status_line[64];
+			char error[160];
 			size_t header_len = i + 1;
 			char *line_end;
+			int status = 0;
 
 			if (header_len >= sizeof(headers))
+			{
+				Q_strncpy(
+					error,
+					"WebSocket handshake headers are too large",
+					sizeof(error)
+				);
+				Cvar_DirectSet(&magd_last_error, error);
+				Con_Printf(S_ERROR "[MAGD] %s\n", error);
 				return false;
+			}
+
 			memcpy(headers, g_rx, header_len);
 			headers[header_len] = 0;
+
 			line_end = Q_strchr(headers, '\n');
 			if (!line_end)
+			{
+				Q_strncpy(
+					error,
+					"Invalid WebSocket handshake response",
+					sizeof(error)
+				);
+				Cvar_DirectSet(&magd_last_error, error);
+				Con_Printf(S_ERROR "[MAGD] %s\n", error);
 				return false;
+			}
 
 			{
-				size_t n = Q_min((int)(line_end - headers), (int)sizeof(status_line) - 1);
+				size_t n = Q_min(
+					(int)(line_end - headers),
+					(int)sizeof(status_line) - 1
+				);
+
 				memcpy(status_line, headers, n);
 				status_line[n] = 0;
 			}
 
-			if (Q_strnicmp(status_line, "HTTP/1.1 101", 12) &&
-				Q_strnicmp(status_line, "HTTP/1.0 101", 12))
+			if (!Q_strnicmp(status_line, "HTTP/1.1 ", 9) &&
+				Q_isdigit(status_line[9]))
+			{
+				status = Q_atoi(status_line + 9);
+			}
+			else if (!Q_strnicmp(status_line, "HTTP/1.0 ", 9) &&
+				Q_isdigit(status_line[9]))
+			{
+				status = Q_atoi(status_line + 9);
+			}
+			else
+			{
+				Q_strncpy(
+					error,
+					"Invalid WebSocket handshake status line",
+					sizeof(error)
+				);
+				Cvar_DirectSet(&magd_last_error, error);
+				Con_Printf(S_ERROR "[MAGD] %s\n", error);
 				return false;
+			}
 
-			if (!MAGD_HeaderValue(headers, "Upgrade", upgrade, sizeof(upgrade)) || Q_stricmp(upgrade, "websocket"))
+			if (status != 101)
+			{
+				Q_snprintf(
+					error,
+					sizeof(error),
+					"WebSocket handshake rejected: HTTP %d",
+					status
+				);
+
+				Cvar_DirectSet(&magd_last_error, error);
+				Con_Printf(S_ERROR "[MAGD] %s\n", error);
 				return false;
-			if (!MAGD_HeaderValue(headers, "Connection", connection, sizeof(connection)) || !Q_stristr(connection, "Upgrade"))
+			}
+
+			if (!MAGD_HeaderValue(
+					headers,
+					"Upgrade",
+					upgrade,
+					sizeof(upgrade)))
+			{
+				Q_strncpy(
+					error,
+					"WebSocket handshake missing Upgrade header",
+					sizeof(error)
+				);
+				Cvar_DirectSet(&magd_last_error, error);
+				Con_Printf(S_ERROR "[MAGD] %s\n", error);
 				return false;
-			if (!MAGD_HeaderValue(headers, "Sec-WebSocket-Accept", accept, sizeof(accept)) || Q_strcmp(accept, g_expected_accept))
+			}
+
+			if (Q_stricmp(upgrade, "websocket"))
+			{
+				Q_strncpy(
+					error,
+					"WebSocket handshake returned invalid Upgrade header",
+					sizeof(error)
+				);
+				Cvar_DirectSet(&magd_last_error, error);
+				Con_Printf(S_ERROR "[MAGD] %s\n", error);
 				return false;
+			}
+
+			if (!MAGD_HeaderValue(
+					headers,
+					"Connection",
+					connection,
+					sizeof(connection)))
+			{
+				Q_strncpy(
+					error,
+					"WebSocket handshake missing Connection header",
+					sizeof(error)
+				);
+				Cvar_DirectSet(&magd_last_error, error);
+				Con_Printf(S_ERROR "[MAGD] %s\n", error);
+				return false;
+			}
+
+			if (!Q_stristr(connection, "Upgrade"))
+			{
+				Q_strncpy(
+					error,
+					"WebSocket handshake returned invalid Connection header",
+					sizeof(error)
+				);
+				Cvar_DirectSet(&magd_last_error, error);
+				Con_Printf(S_ERROR "[MAGD] %s\n", error);
+				return false;
+			}
+
+			if (!MAGD_HeaderValue(
+					headers,
+					"Sec-WebSocket-Accept",
+					accept,
+					sizeof(accept)))
+			{
+				Q_strncpy(
+					error,
+					"WebSocket handshake missing Sec-WebSocket-Accept",
+					sizeof(error)
+				);
+				Cvar_DirectSet(&magd_last_error, error);
+				Con_Printf(S_ERROR "[MAGD] %s\n", error);
+				return false;
+			}
+
+			if (Q_strcmp(accept, g_expected_accept))
+			{
+				Q_strncpy(
+					error,
+					"WebSocket handshake returned invalid Sec-WebSocket-Accept",
+					sizeof(error)
+				);
+				Cvar_DirectSet(&magd_last_error, error);
+				Con_Printf(S_ERROR "[MAGD] %s\n", error);
+				return false;
+			}
 
 			if (g_rx_len > header_len)
 			{
-				memmove(g_rx, g_rx + header_len, g_rx_len - header_len);
+				memmove(
+					g_rx,
+					g_rx + header_len,
+					g_rx_len - header_len
+				);
 				g_rx_len -= header_len;
 			}
 			else
+			{
 				g_rx_len = 0;
+			}
 
 			g_state = MAGD_STATE_OPEN;
-            g_last_rx = MAGD_Now();
-            MAGD_SetConnectionState("connected", NULL);
+			g_last_rx = MAGD_Now();
+			MAGD_SetConnectionState("connected", NULL);
 			g_last_pong = g_last_rx;
 			g_next_keepalive = g_last_rx + MAGD_KEEPALIVE_INTERVAL;
 			g_retry_count = 0;
-			Con_Printf("^2[MAGD]^7 WebSocket tunnel established\n");
+
+			Con_Printf(
+				"^2[MAGD]^7 WebSocket tunnel established\n"
+			);
+
 			return true;
 		}
 	}
 
-	return true; /* incomplete header: keep receiving */
+	return true;
 }
 
 /* ------------------------------------------------------------------------- */
@@ -2085,13 +2230,14 @@ void MAGD_ProcessTunnel(void)
 	double now;
 
 	if (!magd_enabled.value)
-    {
-	if (g_state != MAGD_STATE_IDLE || g_wanted)
-		MAGD_StopTunnel();
+	{
+		if (g_state != MAGD_STATE_IDLE || g_wanted)
+			MAGD_StopTunnel();
 
-	Cvar_DirectSet(&magd_connection_state, "disabled");
-	return;
-    }
+		Cvar_DirectSet(&magd_connection_state, "disabled");
+		return;
+	}
+
 	if (g_mode != MAGD_NET_MODE_TUNNEL)
 		return;
 
@@ -2101,16 +2247,22 @@ void MAGD_ProcessTunnel(void)
 	{
 		if (!g_wanted)
 			return;
+
 		if (g_state == MAGD_STATE_BACKOFF && now < g_next_retry)
 			return;
+
 		if (g_state == MAGD_STATE_BACKOFF && now >= g_next_retry)
 			g_state = MAGD_STATE_IDLE;
+
 		if (g_state == MAGD_STATE_IDLE)
 			MAGD_TryConnect();
+
 		return;
 	}
 
-	if (g_connect_started > 0.0 && now - g_connect_started > MAGD_CONNECT_TIMEOUT && g_state != MAGD_STATE_OPEN)
+	if (g_connect_started > 0.0 &&
+		now - g_connect_started > MAGD_CONNECT_TIMEOUT &&
+		g_state != MAGD_STATE_OPEN)
 	{
 		MAGD_ScheduleRetry("Connection timeout");
 		return;
@@ -2119,18 +2271,25 @@ void MAGD_ProcessTunnel(void)
 	if (g_state == MAGD_STATE_TCP_CONNECTING)
 	{
 		int status = MAGD_CheckTcpConnected();
+
 		if (status < 0)
 		{
 			MAGD_ScheduleRetry("TCP connect failed");
 			return;
 		}
+
 		if (status == 0)
 			return;
+
 		if (g_use_tls)
+		{
 			g_state = MAGD_STATE_TLS;
+		}
 		else if (!MAGD_BuildHandshakeRequest())
 		{
-			MAGD_ScheduleRetry("Could not build WebSocket handshake");
+			MAGD_ScheduleRetry(
+				"Could not build WebSocket handshake"
+			);
 			return;
 		}
 	}
@@ -2138,16 +2297,21 @@ void MAGD_ProcessTunnel(void)
 	if (g_state == MAGD_STATE_TLS)
 	{
 		int status = HTTP_TlsHandshake(g_tls);
+
 		if (status == HTTP_TLS_WANT)
 			return;
+
 		if (status == HTTP_TLS_ERROR)
 		{
 			MAGD_ScheduleRetry("TLS handshake failed");
 			return;
 		}
+
 		if (!MAGD_BuildHandshakeRequest())
 		{
-			MAGD_ScheduleRetry("Could not build WebSocket handshake after TLS");
+			MAGD_ScheduleRetry(
+				"Could not build WebSocket handshake after TLS"
+			);
 			return;
 		}
 	}
@@ -2157,29 +2321,65 @@ void MAGD_ProcessTunnel(void)
 		while (g_request_pos < g_request_len)
 		{
 			int result;
-			if (g_tls)
-				result = HTTP_TlsSend(g_tls, g_request + g_request_pos, (int)(g_request_len - g_request_pos));
-			else
-				result = send(g_socket, g_request + g_request_pos, (int)(g_request_len - g_request_pos), 0);
 
-			if (result == HTTP_TLS_WANT || (result < 0 && MAGD_WouldBlock()))
-				return;
-			if (result <= 0)
+			if (g_tls)
 			{
-				MAGD_ScheduleRetry("WebSocket handshake send failed");
+				result = HTTP_TlsSend(
+					g_tls,
+					g_request + g_request_pos,
+					(int)(g_request_len - g_request_pos)
+				);
+			}
+			else
+			{
+				result = send(
+					g_socket,
+					g_request + g_request_pos,
+					(int)(g_request_len - g_request_pos),
+					0
+				);
+			}
+
+			if (result == HTTP_TLS_WANT ||
+				(result < 0 && MAGD_WouldBlock()))
+			{
 				return;
 			}
+
+			if (result <= 0)
+			{
+				MAGD_ScheduleRetry(
+					"WebSocket handshake send failed"
+				);
+				return;
+			}
+
 			g_request_pos += (size_t)result;
 		}
+
 		g_state = MAGD_STATE_WS_RECV;
 	}
 
-	if (g_state == MAGD_STATE_WS_RECV || g_state == MAGD_STATE_OPEN)
+	if (g_state == MAGD_STATE_WS_RECV ||
+		g_state == MAGD_STATE_OPEN)
 	{
+		/*
+		 * Clear a previous transient error before reading.
+		 * If the handshake itself fails, MAGD_HandshakeComplete()
+		 * writes the actual HTTP/WS reason here.
+		 */
+		Cvar_DirectSet(&magd_last_error, "");
+
 		if (!MAGD_ReadSocket())
 		{
+			const char *reason =
+				magd_last_error.string[0]
+					? magd_last_error.string
+					: "WebSocket receive failed";
+
 			if (g_state != MAGD_STATE_BACKOFF)
-				MAGD_ScheduleRetry("WebSocket receive failed");
+				MAGD_ScheduleRetry(reason);
+
 			return;
 		}
 	}
@@ -2191,11 +2391,13 @@ void MAGD_ProcessTunnel(void)
 			MAGD_SendApplicationPing();
 			g_next_keepalive = now + MAGD_KEEPALIVE_INTERVAL;
 		}
+
 		if (now - g_last_pong > MAGD_KEEPALIVE_TIMEOUT)
 		{
 			MAGD_ScheduleRetry("MAGD keepalive timeout");
 			return;
 		}
+
 		MAGD_SendQueued();
 		MAGD_FlushTx();
 	}
