@@ -902,7 +902,7 @@ static int HTTP_FileProcessStream( httpfile_t *curfile )
 
 				int num = -1;
 
-				// don't assume the response is valid HTTP
+				// Don't assume the response is valid HTTP.
 				if( !Q_strncmp( curfile->buf, "HTTP/1.", 7 ))
 				{
 					char tmp[4];
@@ -912,9 +912,17 @@ static int HTTP_FileProcessStream( httpfile_t *curfile )
 						num = Q_atoi( tmp );
 				}
 
-				if( num != 200 )
+				/*
+				 * Any 2xx status is a successful HTTP response.
+				 *
+				 * MAGD room creation returns 201 Created, while
+				 * guest authentication and room listing normally
+				 * return 200 OK.
+				 */
+				if( num < 200 || num >= 300 )
 				{
-					if( num == 301 || num == 302 || num == 303 || num == 307 || num == 308 )
+					if( num == 301 || num == 302 || num == 303 ||
+						num == 307 || num == 308 )
 					{
 						char *loc = Q_stristr( curfile->buf, "Location:" );
 
@@ -925,8 +933,10 @@ static int HTTP_FileProcessStream( httpfile_t *curfile )
 								loc++;
 
 							char *eol = Q_strchr( loc, '\r' );
-							if( !eol ) eol = Q_strchr( loc, '\n' );
-							if( eol ) *eol = 0;
+							if( !eol )
+								eol = Q_strchr( loc, '\n' );
+							if( eol )
+								*eol = 0;
 
 							if( HTTP_FileRedirect( curfile, loc ))
 								return 1;
@@ -934,18 +944,32 @@ static int HTTP_FileProcessStream( httpfile_t *curfile )
 					}
 
 					char *p = Q_strchr( curfile->buf, '\r' );
-					if( !p ) p = Q_strchr( curfile->buf, '\n' );
-					if( p ) *p = 0;
+					if( !p )
+						p = Q_strchr( curfile->buf, '\n' );
+					if( p )
+						*p = 0;
 
 					switch( num )
 					{
 					case 404:
-						Con_Printf( S_ERROR "%s: file not found\n", curfile->path );
+						Con_Printf(
+							S_ERROR "%s: file not found\n",
+							curfile->to_memory ? curfile->url : curfile->path
+						);
 						break;
+
 					default:
-						Con_Printf( S_ERROR "%s: bad response: %s\n", curfile->path, curfile->buf );
+						Con_Printf(
+							S_ERROR "%s: bad response: %s\n",
+							curfile->to_memory ? curfile->url : curfile->path,
+							curfile->buf
+						);
+
 						if( http_show_headers.value )
-							Con_Printf( "Request headers: %s", curfile->query_backup );
+							Con_Printf(
+								"Request headers: %s",
+								curfile->query_backup
+							);
 						break;
 					}
 
@@ -953,48 +977,106 @@ static int HTTP_FileProcessStream( httpfile_t *curfile )
 					return 0;
 				}
 
-				char *content_encoding = Q_stristr( curfile->buf, "Content-Encoding" );
-				if( content_encoding ) // fetch compressed status
+				if( Q_stristr( curfile->buf, "Content-Encoding" ))
 				{
+					char *content_encoding =
+						Q_stristr( curfile->buf, "Content-Encoding" );
+
 					content_encoding += sizeof( "Content-Encoding: " ) - 1;
 
 					if( curfile->to_memory )
 					{
-						// in-memory mode never advertises gzip and has no decompressor
-						Con_Printf( S_ERROR "%s: server sent Content-Encoding for an in-memory request\n", curfile->url );
+						// In-memory mode never advertises gzip and has no decompressor.
+						Con_Printf(
+							S_ERROR
+							"%s: server sent Content-Encoding for an in-memory request\n",
+							curfile->url
+						);
+
 						HTTP_FreeFile( curfile, true );
 						return 0;
 					}
-					else if( !Q_strnicmp( content_encoding, "gzip", 4 ) && ( content_encoding[4] == '\0' || content_encoding[4] == '\n' || content_encoding[4] == '\r' ))
+					else if(
+						!Q_strnicmp( content_encoding, "gzip", 4 ) &&
+						(
+							content_encoding[4] == '\0' ||
+							content_encoding[4] == '\n' ||
+							content_encoding[4] == '\r'
+						)
+					)
+					{
 						curfile->compressed = true;
+					}
 					else
 					{
-						Con_Printf( S_ERROR "%s: bad Content-Encoding: %s\n", curfile->path, content_encoding );
+						Con_Printf(
+							S_ERROR "%s: bad Content-Encoding: %s\n",
+							curfile->path,
+							content_encoding
+						);
+
 						if( http_show_headers.value )
-							Con_Printf( "Request headers: %s", curfile->query_backup );
+							Con_Printf(
+								"Request headers: %s",
+								curfile->query_backup
+							);
+
 						HTTP_FreeFile( curfile, true );
 						return 0;
 					}
 				}
 
-				if(( transfer_encoding = Q_stristr( curfile->buf, "Transfer-Encoding: chunked" )))
+				if(
+					transfer_encoding =
+						Q_stristr(
+							curfile->buf,
+							"Transfer-Encoding: chunked"
+						)
+				)
 				{
 					curfile->size = -1;
 					curfile->chunked = true;
 
-					Con_Reportf( "HTTP: Got 200 OK! Chunked transfer encoding%s\n", curfile->compressed ? ", compressed" : "" );
+					Con_Reportf(
+						"HTTP: Got %d OK! Chunked transfer encoding%s\n",
+						num,
+						curfile->compressed ? ", compressed" : ""
+					);
 				}
-				else if(( content_length = Q_stristr( curfile->buf, "Content-Length: " ) ))
+				else if(
+					content_length =
+						Q_stristr(
+							curfile->buf,
+							"Content-Length: "
+						)
+				)
 				{
 					content_length += sizeof( "Content-Length: " ) - 1;
+
 					int size = Q_atoi( content_length );
 
-					Con_Reportf( "HTTP: Got 200 OK! File size is %d%s\n", size, curfile->compressed ? ", compressed" : "" );
+					Con_Reportf(
+						"HTTP: Got %d OK! File size is %d%s\n",
+						num,
+						size,
+						curfile->compressed ? ", compressed" : ""
+					);
 
 					if( !curfile->compressed )
 					{
-						if( ( curfile->size != -1 ) && ( curfile->size != size )) // check size if specified, not used
-							Con_Reportf( S_WARN "Server reports wrong file size for %s!\n", curfile->path );
+						if(
+							( curfile->size != -1 ) &&
+							( curfile->size != size )
+						)
+						{
+							Con_Reportf(
+								S_WARN
+								"Server reports wrong file size for %s!\n",
+								curfile->to_memory ?
+									curfile->url :
+									curfile->path
+							);
+						}
 					}
 
 					curfile->size = size;
@@ -1003,30 +1085,52 @@ static int HTTP_FileProcessStream( httpfile_t *curfile )
 
 				if( curfile->size == -1 && !curfile->chunked )
 				{
-					// Usually fastdl's reports file size if link is correct
-					Con_Printf( S_ERROR "file size is unknown, refusing download!\n" );
+					// Usually fastdl's reports file size if link is correct.
+					Con_Printf(
+						S_ERROR
+						"file size is unknown, refusing download!\n"
+					);
+
 					HTTP_FreeFile( curfile, true );
 					return 0;
 				}
 
 				if( http_show_headers.value )
-					Con_Reportf( "Response headers: %s\n", curfile->buf );
+					Con_Reportf(
+						"Response headers: %s\n",
+						curfile->buf
+					);
 
-				curfile->got_response = true; // got response, let's start download
+				curfile->got_response = true;
 
 				if( !curfile->to_memory && !curfile->file )
 				{
 					char name[MAX_SYSPATH];
 
-					HTTP_DownloadPath( name, sizeof( name ), curfile->path, true );
+					HTTP_DownloadPath(
+						name,
+						sizeof( name ),
+						curfile->path,
+						true
+					);
 
 					FS_AllowDirectPaths( true );
-					curfile->file = FS_Open( name, "wb+", true );
+					curfile->file =
+						FS_Open(
+							name,
+							"wb+",
+							true
+						);
 					FS_AllowDirectPaths( false );
 
 					if( !curfile->file )
 					{
-						Con_Printf( S_ERROR "HTTP: cannot open %s!\n", name );
+						Con_Printf(
+							S_ERROR
+							"HTTP: cannot open %s!\n",
+							name
+						);
+
 						HTTP_FreeFile( curfile, true );
 						return 0;
 					}
@@ -1036,7 +1140,13 @@ static int HTTP_FileProcessStream( httpfile_t *curfile )
 
 				if( res - ( begin - curfile->buf ) > 0 )
 				{
-					if( !HTTP_FileSaveReceivedData( curfile, begin - curfile->buf, res - ( begin - curfile->buf )))
+					if(
+						!HTTP_FileSaveReceivedData(
+							curfile,
+							begin - curfile->buf,
+							res - ( begin - curfile->buf )
+						)
+					)
 						return 0;
 				}
 			}
@@ -1047,17 +1157,27 @@ static int HTTP_FileProcessStream( httpfile_t *curfile )
 		{
 			memcpy( curfile->buf, buf, res );
 
-			// data download
-			if( !HTTP_FileSaveReceivedData( curfile, 0, res ))
+			if(
+				!HTTP_FileSaveReceivedData(
+					curfile,
+					0,
+					res
+				)
+			)
 				return 0;
 
-			// as after it will run in same frame
 			if( curfile->checktime > 5 )
 			{
-				float speed = (float)curfile->lastchecksize / ( 5.0f * 1024 );
+				float speed =
+					(float)curfile->lastchecksize /
+					( 5.0f * 1024 );
 
 				curfile->checktime = 0;
-				Con_Reportf( "download speed %f KB/s\n", speed );
+				Con_Reportf(
+					"download speed %f KB/s\n",
+					speed
+				);
+
 				curfile->lastchecksize = 0;
 			}
 		}
@@ -1065,12 +1185,14 @@ static int HTTP_FileProcessStream( httpfile_t *curfile )
 
 	if( curfile->size > 0 )
 	{
-		http.progress += (float)curfile->downloaded / curfile->size;
+		http.progress +=
+			(float)curfile->downloaded /
+			curfile->size;
+
 		http.progress_count++;
 
 		if( curfile->downloaded >= curfile->size )
 		{
-			// chunked files are finalized in FileSaveReceivedData
 			if( curfile->compressed && !curfile->chunked )
 			{
 				curfile->pfn_process = HTTP_FileDecompress;
@@ -1078,16 +1200,31 @@ static int HTTP_FileProcessStream( httpfile_t *curfile )
 			}
 			else
 			{
-				HTTP_FreeFile( curfile, false ); // success
+				HTTP_FreeFile(
+					curfile,
+					false
+				);
 			}
+
 			return 0;
 		}
 	}
 
 	if( res == 0 )
 	{
-		Con_Printf( S_ERROR "connection closed prematurely for %s\n", curfile->to_memory ? curfile->url : curfile->path );
-		HTTP_FreeFile( curfile, true );
+		Con_Printf(
+			S_ERROR
+			"connection closed prematurely for %s\n",
+			curfile->to_memory ?
+				curfile->url :
+				curfile->path
+		);
+
+		HTTP_FreeFile(
+			curfile,
+			true
+		);
+
 		return 0;
 	}
 
@@ -1097,7 +1234,11 @@ static int HTTP_FileProcessStream( httpfile_t *curfile )
 		{
 			if( res != HTTP_TLS_WANT )
 			{
-				HTTP_FreeFile( curfile, true );
+				HTTP_FreeFile(
+					curfile,
+					true
+				);
+
 				return 0;
 			}
 		}
@@ -1105,10 +1246,22 @@ static int HTTP_FileProcessStream( httpfile_t *curfile )
 		{
 			int err = WSAGetLastError();
 
-			if( err != WSAEWOULDBLOCK && err != WSAEINPROGRESS )
+			if(
+				err != WSAEWOULDBLOCK &&
+				err != WSAEINPROGRESS
+			)
 			{
-				Con_Reportf( "problem downloading %s: %s\n", curfile->path, NET_ErrorString( ));
-				HTTP_FreeFile( curfile, true );
+				Con_Reportf(
+					"problem downloading %s: %s\n",
+					curfile->path,
+					NET_ErrorString()
+				);
+
+				HTTP_FreeFile(
+					curfile,
+					true
+				);
+
 				return 0;
 			}
 		}
@@ -1117,14 +1270,15 @@ static int HTTP_FileProcessStream( httpfile_t *curfile )
 
 		if( !curfile->got_response )
 			curfile->blockreason = "receiving header";
-		else curfile->blockreason = "receiving data";
+		else
+			curfile->blockreason = "receiving data";
+
 		return 0;
 	}
 
 	curfile->checktime += host.frametime;
-	return 0; // don't block
+	return 0;
 }
-
 /*
 ==============
 HTTP_Run
