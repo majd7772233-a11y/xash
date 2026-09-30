@@ -978,12 +978,12 @@ static qboolean MAGD_HandshakeComplete(void)
 			}
 
 			if (!Q_strnicmp(status_line, "HTTP/1.1 ", 9) &&
-				Q_isdigit(status_line[9]))
+			Q_isdigit(status_line + 9))
 			{
 				status = Q_atoi(status_line + 9);
 			}
 			else if (!Q_strnicmp(status_line, "HTTP/1.0 ", 9) &&
-				Q_isdigit(status_line[9]))
+				Q_isdigit(status_line + 9))
 			{
 				status = Q_atoi(status_line + 9);
 			}

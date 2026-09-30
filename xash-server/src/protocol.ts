@@ -128,36 +128,6 @@ export function parseHeader(
   };
 }
 
-  const view = new DataView(buffer);
-
-  const magic = view.getUint16(0, false);
-  const type = view.getUint8(2) as MagdMessageTypeValue;
-  const length = view.getUint16(3, false);
-
-  if (
-    magic !== MAGD_MAGIC ||
-    buffer.byteLength !== MAGD_HEADER_SIZE + length
-  ) {
-    return null;
-  }
-
-  if (
-    type === MagdMessageType.GAME_DATAGRAM &&
-    (
-      length < MAGD_GAME_ENVELOPE_SIZE ||
-      length > MAGD_GAME_ENVELOPE_SIZE + MAGD_MAX_PACKET_SIZE
-    )
-  ) {
-    return null;
-  }
-
-  return {
-    magic,
-    type,
-    length,
-  };
-}
-
 export function createGameDatagram(
   flags: number,
   peerId: number,

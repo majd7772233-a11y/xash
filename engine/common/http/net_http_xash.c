@@ -1027,11 +1027,11 @@ static int HTTP_FileProcessStream( httpfile_t *curfile )
 				}
 
 				if(
-					transfer_encoding =
+					( transfer_encoding =
 						Q_stristr(
 							curfile->buf,
 							"Transfer-Encoding: chunked"
-						)
+						) ) != NULL
 				)
 				{
 					curfile->size = -1;
@@ -1044,12 +1044,12 @@ static int HTTP_FileProcessStream( httpfile_t *curfile )
 					);
 				}
 				else if(
-					content_length =
-						Q_stristr(
-							curfile->buf,
-							"Content-Length: "
-						)
-				)
+						( content_length =
+							Q_stristr(
+								curfile->buf,
+								"Content-Length: "
+							) ) != NULL
+					 )
 				{
 					content_length += sizeof( "Content-Length: " ) - 1;
 
