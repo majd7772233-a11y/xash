@@ -102,6 +102,11 @@ const char *MAGD_MapAddressToSession(const netadr_t *adr);
 void MAGD_ClearSessionMaps(void);
 
 qboolean MAGD_SendDatagram(const void *data, size_t length, const netadr_t *to);
-qboolean MAGD_GetDatagram(byte *data, size_t *length, netadr_t *from);
+qboolean MAGD_GetDatagram(
+	byte *data,
+	size_t *length,
+	netadr_t *from,
+	int source
+);
 
 #endif /* MAGD_NET_H */

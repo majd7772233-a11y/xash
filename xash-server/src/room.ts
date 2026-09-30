@@ -1,4 +1,6 @@
 import {
+  MAGD_HEADER_SIZE,
+  MAGD_MAX_MESSAGE_SIZE,
   createGameDatagram,
   createMessage,
   GAME_BROADCAST,

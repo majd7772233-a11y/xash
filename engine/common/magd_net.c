@@ -99,7 +99,8 @@ typedef enum magd_state_e
 
 static magd_net_mode_t g_mode = MAGD_NET_MODE_LAN;
 static magd_state_t g_state = MAGD_STATE_IDLE;
-static magd_queue_t g_incoming;
+static magd_queue_t g_incoming_client;
+static magd_queue_t g_incoming_server;
 static magd_queue_t g_outgoing;
 static magd_session_map_t g_sessions[MAGD_MAX_SESSIONS];
 
@@ -593,6 +594,17 @@ static void MAGD_ScheduleRetry(const char *reason)
 		return;
 	}
 
+	/*
+	 * A successful WebSocket reconnect is not enough for the Xash
+	 * game client. The virtual game connection must be established
+	 * again after WELCOME.
+	 *
+	 * MAGD_StopTunnel() clears this flag when the user intentionally
+	 * disconnects, so transient reconnects are the only case affected.
+	 */
+	if (!g_host && magd_auto_connect.value)
+		g_auto_connect_pending = true;
+
 	delay = MAGD_RECONNECT_MIN * (double)(1 << bound(0, g_retry_count, 4));
 
 	if (delay > MAGD_RECONNECT_MAX)
@@ -607,7 +619,6 @@ static void MAGD_ScheduleRetry(const char *reason)
 
 	Con_Printf("[MAGD] reconnect scheduled in %.1fs\n", delay);
 }
-
 static void MAGD_StopTunnel(void)
 {
 	g_wanted = false;
@@ -616,6 +627,11 @@ static void MAGD_StopTunnel(void)
 
 	MAGD_ResetTransport();
 	MAGD_ClearSessionMaps();
+
+	/* Never carry packets from an old room/session into the next one. */
+	MAGD_QueueInit(&g_incoming_client);
+	MAGD_QueueInit(&g_incoming_server);
+	MAGD_QueueInit(&g_outgoing);
 
 	g_state = MAGD_STATE_IDLE;
 
@@ -1314,12 +1330,16 @@ static void MAGD_HandleApplication(const byte *data, size_t len)
 	if (type == MAGD_TYPE_PING)
 	{
 		byte pong[MAGD_MAX_PACKET_SIZE + 5];
+
 		if (len > sizeof(pong))
 			return;
+
 		memcpy(pong, data, len);
 		pong[2] = MAGD_TYPE_PONG;
+
 		if (MAGD_QueueWsFrame(MAGD_WS_OPCODE_BINARY, pong, len))
 			MAGD_FlushTx();
+
 		return;
 	}
 
@@ -1330,31 +1350,36 @@ static void MAGD_HandleApplication(const byte *data, size_t len)
 	}
 
 	if (type == MAGD_TYPE_WELCOME)
-    {
-	netadr_t host_adr;
+	{
+		netadr_t host_adr;
 
-	MAGD_SetConnectionState("connected", NULL);
+		MAGD_SetConnectionState("connected", NULL);
 
-	if (!MAGD_MapSessionToAddress("host", &host_adr))
+		if (!MAGD_MapSessionToAddress("host", &host_adr))
+			return;
+
+		g_welcome_seen = true;
+
+		if (g_host && g_start_server_pending &&
+			magd_auto_start_server.value)
+		{
+			g_start_server_pending = false;
+			MAGD_StartLocalServer();
+		}
+
+		/*
+		 * This flag is true on the first connection and is restored
+		 * by MAGD_ScheduleRetry() after a transient tunnel failure.
+		 */
+		if (!g_host && g_auto_connect_pending &&
+			magd_auto_connect.value)
+		{
+			g_auto_connect_pending = false;
+			Cbuf_AddText("connect 10.254.0.1:27015\n");
+		}
+
 		return;
-
-	g_welcome_seen = true;
-
-	if (g_host && g_start_server_pending &&
-		magd_auto_start_server.value)
-	{
-		g_start_server_pending = false;
-		MAGD_StartLocalServer();
 	}
-
-	if (!g_host && g_auto_connect_pending && magd_auto_connect.value)
-	{
-		g_auto_connect_pending = false;
-		Cbuf_AddText("connect 10.254.0.1:27015\n");
-	}
-
-	return;
-    }
 
 	if (type == MAGD_TYPE_ERROR || type == MAGD_TYPE_READY)
 		return;
@@ -1366,24 +1391,57 @@ static void MAGD_HandleApplication(const byte *data, size_t len)
 		byte flags = payload[0];
 		byte peer = payload[1];
 		netadr_t from;
+		magd_queue_t *incoming_queue;
 
 		if (g_host)
 		{
 			char session_id[32];
-			if (!(flags & MAGD_GAME_HAS_SENDER) || peer == MAGD_PEER_BROADCAST || peer == 0)
+
+			/*
+			 * A host receives remote player packets. These belong to
+			 * the Xash server side, never to the host's local client.
+			 */
+			if (!(flags & MAGD_GAME_HAS_SENDER) ||
+				peer == MAGD_PEER_BROADCAST ||
+				peer == 0)
+			{
 				return;
-			Q_snprintf(session_id, sizeof(session_id), "peer_%u", (unsigned int)peer);
+			}
+
+			Q_snprintf(
+				session_id,
+				sizeof(session_id),
+				"peer_%u",
+				(unsigned int)peer
+			);
+
 			if (!MAGD_MapSessionToAddress(session_id, &from))
 				return;
+
+			incoming_queue = &g_incoming_server;
 		}
 		else
 		{
+			/*
+			 * A normal MAGD client receives packets from the remote
+			 * host. These belong to the Xash client side.
+			 */
 			if (!MAGD_MapSessionToAddress("host", &from))
 				return;
+
+			incoming_queue = &g_incoming_client;
 		}
 
-		if (!MAGD_QueuePush(&g_incoming, payload + 2, payload_len - 2, &from))
-			Con_DPrintf("[MAGD] incoming queue full; dropping packet\n");
+		if (!MAGD_QueuePush(
+				incoming_queue,
+				payload + 2,
+				payload_len - 2,
+				&from))
+		{
+			Con_DPrintf(
+				"[MAGD] incoming queue full; dropping packet\n"
+			);
+		}
 	}
 }
 
@@ -2189,7 +2247,8 @@ void MAGD_Init(void)
 	"Refresh the MAGD online room list");
 	
 
-	MAGD_QueueInit(&g_incoming);
+	MAGD_QueueInit(&g_incoming_client);
+	MAGD_QueueInit(&g_incoming_server);
 	MAGD_QueueInit(&g_outgoing);
 	MAGD_ClearSessionMaps();
 	MAGD_ResetTransport();
@@ -2410,11 +2469,31 @@ qboolean MAGD_SendDatagram(const void *data, size_t length, const netadr_t *to)
 	return MAGD_QueuePush(&g_outgoing, data, length, to);
 }
 
-qboolean MAGD_GetDatagram(byte *data, size_t *length, netadr_t *from)
+qboolean MAGD_GetDatagram(
+	byte *data,
+	size_t *length,
+	netadr_t *from,
+	int source
+)
 {
+	magd_queue_t *incoming_queue;
+
 	if (!magd_enabled.value || g_mode != MAGD_NET_MODE_TUNNEL)
 		return false;
-	return MAGD_QueuePop(&g_incoming, data, length, from);
+
+	if (source == 0)
+		incoming_queue = &g_incoming_client;
+	else if (source == 1)
+		incoming_queue = &g_incoming_server;
+	else
+		return false;
+
+	return MAGD_QueuePop(
+		incoming_queue,
+		data,
+		length,
+		from
+	);
 }
 
 #if XASH_ENGINE_TESTS
