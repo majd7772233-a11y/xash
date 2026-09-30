@@ -464,20 +464,6 @@ async webSocketMessage(
       return;
   }
 }
-    const header = parseHeader(message);
-    if (!header) return;
-
-    if (header.type === MagdMessageType.PING) {
-      try {
-        const payload = new Uint8Array(message, 5, header.length).slice();
-        ws.send(createMessage(MagdMessageType.PONG, payload));
-      } catch {}
-      return;
-    }
-    if (header.type === MagdMessageType.READY) return;
-    if (header.type !== MagdMessageType.GAME_DATAGRAM) return;
-    await this.relayGameDatagram(ws, message);
-  }
 
   async webSocketClose(ws: WebSocket): Promise<void> {
     const session = this.sessions.get(ws);
