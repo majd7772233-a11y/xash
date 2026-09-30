@@ -2264,8 +2264,7 @@ void MAGD_Shutdown(void)
 {
 	MAGD_StopTunnel();
 	MAGD_ClearSessionMaps();
-	MAGD_QueueInit(&g_incoming);
-	MAGD_QueueInit(&g_outgoing);
+
 	g_mode = MAGD_NET_MODE_LAN;
 }
 
