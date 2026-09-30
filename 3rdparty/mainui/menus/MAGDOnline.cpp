@@ -15,7 +15,7 @@ MAGDOnline.cpp - MAGD Multiplayer Platform UI
 #include <stdlib.h>
 #include <string.h>
 
-#define ART_BANNER_MAGD		"gfx/shell/head_inetgames"
+#define ART_BANNER_MAGD		"gfx/shell/head_multi"
 #define MAGD_ROOM_CACHE		"magd_rooms.json"
 
 static void UI_MAGDCreate_Menu( void );
@@ -107,37 +107,37 @@ static bool MAGD_TextSafe( const char *text )
 static const char *MAGD_ConnectionStateText( const char *state )
 {
 	if( !state || !state[0] )
-		return "Disconnected";
+		return L( "Disconnected" );
 
 	if( !strcmp( state, "disconnected" ))
-		return "Disconnected";
+		return L( "Disconnected" );
 
 	if( !strcmp( state, "disabled" ))
-		return "Disabled";
+		return L( "Disabled" );
 
 	if( !strcmp( state, "creating" ))
-		return "Creating room";
+		return L( "Creating room" );
 
 	if( !strcmp( state, "authenticating" ))
-		return "Authenticating";
+		return L( "Authenticating" );
 
 	if( !strcmp( state, "connecting" ))
-		return "Connecting";
+		return L( "Connecting" );
 
 	if( !strcmp( state, "tls" ))
-		return "Securing connection";
+		return L( "Securing connection" );
 
 	if( !strcmp( state, "handshake" ))
-		return "Establishing session";
+		return L( "Establishing session" );
 
 	if( !strcmp( state, "connected" ))
-		return "Connected";
+		return L( "Connected" );
 
 	if( !strcmp( state, "reconnecting" ))
-		return "Reconnecting";
+		return L( "Reconnecting" );
 
 	if( !strcmp( state, "error" ))
-		return "Connection error";
+		return L( "Connection error" );
 
 	return state;
 }
@@ -563,13 +563,12 @@ public:
 					room.maxPlayers
 				);
 
-				snprintf(
+				Q_strncpy(
 					room.status,
-					sizeof( room.status ),
-					"%s",
 					room.hostConnected ?
-						"Online" :
-						"Waiting"
+						L( "Online" ) :
+						L( "Waiting" ),
+					sizeof( room.status )
 				);
 
 				rooms.AddToTail( room );
@@ -716,7 +715,9 @@ public:
 		createRoom( NULL ),
 		browseRooms( NULL ),
 		joinRoom( NULL ),
-		disconnect( NULL )
+		settings( NULL ),
+		disconnect( NULL ),
+		done( NULL )
 	{
 		;
 	}
@@ -830,13 +831,16 @@ private:
 	}
 
 	void _Init() override;
+	void _VidInit() override;
 
 	CMenuField status;
 
 	CMenuPicButton *createRoom;
-	CMenuPicButton *browseRooms;
-	CMenuPicButton *joinRoom;
-	CMenuPicButton *disconnect;
+    CMenuPicButton *browseRooms;
+    CMenuPicButton *joinRoom;
+    CMenuPicButton *settings;
+    CMenuPicButton *disconnect;
+    CMenuPicButton *done;
 };
 
 /* ------------------------------------------------------------------------- */
@@ -1406,7 +1410,7 @@ private:
 			snprintf(
 				text,
 				sizeof( text ),
-				"Updating rooms - Connection: %s",
+				L( "Updating rooms - Connection: %s" ),
 				MAGD_ConnectionStateText(
 					connection
 				)
@@ -1418,10 +1422,10 @@ private:
 			snprintf(
 				text,
 				sizeof( text ),
-				"Room refresh failed: %s",
+				L( "Room refresh failed: %s" ),
 				error && error[0] ?
 					error :
-					"Unknown error"
+					L( "Unknown error" )
 			);
 		}
 		else
@@ -1429,7 +1433,7 @@ private:
 			snprintf(
 				text,
 				sizeof( text ),
-				"%d room%s - Connection: %s",
+				L( "%d room%s - Connection: %s" ),
 				model.GetRows(),
 				model.GetRows() == 1 ?
 					"" :
@@ -1469,6 +1473,7 @@ private:
 	int refreshUntil;
 };
 
+
 /* ------------------------------------------------------------------------- */
 /* Main MAGD menu init                                                       */
 /* ------------------------------------------------------------------------- */
@@ -1479,14 +1484,14 @@ void CMenuMAGDOnline::_Init()
 		ART_BANNER_MAGD
 	);
 
-	status.szName = L( "Connection" );
-	status.iFlags |= QMF_INACTIVE;
-	status.SetCharSize( QM_SMALLFONT );
-	status.SetRect(
-		300,
-		185,
-		-20,
-		42
+	status.szName =
+		L( "MAGD Connection" );
+
+	status.iFlags |=
+		QMF_INACTIVE;
+
+	status.SetCharSize(
+		QM_SMALLFONT
 	);
 
 	AddItem( banner );
@@ -1519,6 +1524,7 @@ void CMenuMAGDOnline::_Init()
 			QMF_NOTIFY
 		);
 
+	settings =
 	AddButton(
 		L( "Settings" ),
 		L( "Configure the MAGD multiplayer platform" ),
@@ -1536,6 +1542,7 @@ void CMenuMAGDOnline::_Init()
 			QMF_NOTIFY
 		);
 
+	done =
 	AddButton(
 		L( "Done" ),
 		L( "Go back to the Multiplayer menu" ),
@@ -1544,6 +1551,47 @@ void CMenuMAGDOnline::_Init()
 		QMF_NOTIFY
 	);
 }
+
+void CMenuMAGDOnline::_VidInit()
+{
+	status.SetRect(
+		300,
+		185,
+		-20,
+		42
+	);
+
+	createRoom->SetCoord(
+		350,
+		245
+	);
+
+	browseRooms->SetCoord(
+		350,
+		300
+	);
+
+	joinRoom->SetCoord(
+		350,
+		355
+	);
+
+	settings->SetCoord(
+		350,
+		410
+	);
+
+	disconnect->SetCoord(
+		350,
+		465
+	);
+
+	done->SetCoord(
+		350,
+		520
+	);
+}
+
 
 
 /* ------------------------------------------------------------------------- */
