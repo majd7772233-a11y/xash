@@ -138,7 +138,9 @@ if [[ "$REQUIRE_SIGNING" == "1" ]]; then
 			-keystore "$MAGD_KEYSTORE_FILE" \
 			-storepass "$KEYSTORE_PASSWORD" \
 			-alias "$KEY_ALIAS" |
-		awk -F': ' '/SHA256:/{print $2; exit}'
+		awk -F': ' '/SHA256:/{print $2; exit}' |
+		tr '[:lower:]' '[:upper:]' |
+		tr -d '\r'
 	)"
 
 	ACTUAL_CERT="$(
@@ -146,7 +148,9 @@ if [[ "$REQUIRE_SIGNING" == "1" ]]; then
 			--verbose \
 			--print-certs \
 			artifacts/xash3d-fwgs-android.apk 2>&1 |
-		awk -F': ' '/Signer #1 certificate SHA-256 digest:/{print $2; exit}'
+		awk -F': ' '/Signer #1 certificate SHA-256 digest:/{print $2; exit}' |
+		tr '[:lower:]' '[:upper:]' |
+		tr -d '\r'
 	)"
 
 	if [[ -z "$EXPECTED_CERT" || -z "$ACTUAL_CERT" ]]; then
